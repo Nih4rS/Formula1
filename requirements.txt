@@ -1,0 +1,6 @@
+streamlit>=1.39.0
+plotly>=5.23.0
+pandas>=2.2.2
+numpy>=1.26.4
+fastf1>=3.4.0
+pyyaml>=6.0.2

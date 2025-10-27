@@ -1,0 +1,54 @@
+# --- Python bytecode and tools
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.log
+.coverage*
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# --- Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# --- Editor settings
+.vscode/
+.idea/
+
+# --- OS files
+.DS_Store
+Thumbs.db
+
+# --- Build artifacts
+build/
+dist/
+
+# --- Streamlit & secrets
+.streamlit/secrets.toml
+
+# --- FastF1 cache (only if you keep a local cache inside the repo)
+fastf1_cache/
+tmp/
+temp/
+
+# --- Data policy
+# Ignore everything under data by default...
+data/*
+# ...but keep JSON outputs and docs you want to serve with the app
+!data/**/*.json
+!data/schema.md
+
+# keep JSON outputs and schema; ignore everything else in data/
+data/*
+!data/**/*.json
+!data/schema.md
+!data/.gitkeep
+
+# cache stays local
+fastf1_cache/
