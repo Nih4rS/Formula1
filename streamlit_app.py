@@ -4,6 +4,7 @@ import numpy as np
 from utils.data_loader import list_years, list_events, list_sessions, list_drivers, load_lap
 from utils.lap_delta import lap_delta
 from utils.plotting import line, multi_line
+from utils.map_loader import load_map_data, build_track_figure
 
 st.set_page_config(page_title="F1 Lap Explorer", layout="wide")
 
@@ -19,6 +20,17 @@ if not years:
 year = st.sidebar.selectbox("Year", years, index=len(years)-1)
 events = list_events(year)
 event = st.sidebar.selectbox("Grand Prix", events, index=0) if events else st.stop()
+# ---- TRACK MAP SECTION ----
+st.markdown("---")
+st.header("Circuit Map")
+
+map_data = load_map_data(year, event)
+if not map_data:
+    st.warning("No map data found for this Grand Prix. Run build_maps.py to generate it.")
+else:
+    fig_map = build_track_figure(map_data, event)
+    st.plotly_chart(fig_map, use_container_width=True)
+
 sessions = list_sessions(year, event)
 session = st.sidebar.selectbox("Session", sessions, index=0) if sessions else st.stop()
 
