@@ -16,7 +16,7 @@ from utils.lap_delta import lap_delta
 from utils.plotting import multi_line
 from utils.map_loader import load_map_data, build_track_figure
 from utils.schedule import fetch_schedule, next_session, countdown_str
-from utils.events import slug_to_event_name
+from utils.events import slug_to_event_name, event_name_to_slug
 
 
 def format_timedelta(value) -> Optional[str]:
@@ -87,6 +87,16 @@ def load_race_summary(year: int, event_slug: str) -> Dict[str, Any]:
             }
     return summary
 
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def load_schedule(year: int) -> pd.DataFrame:
+    """Cached wrapper around fetch_schedule with graceful failure."""
+    try:
+        df = fetch_schedule(year)
+    except Exception:
+        return pd.DataFrame()
+    return df
+
 # ---------------------------
 # Page setup
 # ---------------------------
@@ -115,12 +125,17 @@ with tab_schedule:
     st.subheader("Season Schedule")
 
     years_all = [str(y) for y in (list_years() or list(range(2014, 2025 + 1)))]
-    if st.session_state["year"] is None:
-        st.session_state["year"] = years_all[0]
+    current_year_value = st.session_state["year"] or years_all[0]
+    sched_year = st.selectbox(
+        "Year",
+        years_all,
+        index=years_all.index(current_year_value),
+        key="sched_year_selector"
+    )
+    if st.session_state.get("year") != sched_year:
+        st.session_state["year"] = sched_year
 
-    sched_year = st.selectbox("Year", years_all, index=years_all.index(st.session_state["year"]), key="sched_year")
-
-    df_sched = fetch_schedule(int(sched_year))
+    df_sched = load_schedule(int(sched_year))
     if df_sched.empty:
         st.info("No schedule data available yet for this year.")
     else:
@@ -130,19 +145,27 @@ with tab_schedule:
             with cols[0]:
                 st.metric("Next", ns['EventName'], help=ns['Session'])
             with cols[1]:
-                st.metric("Local time", ns['StartLocal'].strftime("%a %d %b %H:%M"))
+                local_ts = ns['StartLocal']
+                local_fmt = local_ts.strftime("%a %d %b %H:%M") if pd.notna(local_ts) else "TBD"
+                st.metric("Local time", local_fmt)
             with cols[2]:
-                st.metric("UTC", ns['StartUTC'].strftime("%a %d %b %H:%M"))
+                utc_ts = ns['StartUTC']
+                utc_fmt = utc_ts.strftime("%a %d %b %H:%M") if pd.notna(utc_ts) else "TBD"
+                st.metric("UTC", utc_fmt)
             with cols[3]:
                 st.metric("Session", ns['Session'])
             with cols[4]:
-                st.metric("Countdown", countdown_str(ns['StartUTC']))
+                st.metric("Countdown", countdown_str(ns['StartUTC']) if pd.notna(utc_ts) else "TBD")
 
         st.markdown("### Full Schedule")
         show_local = st.toggle("Show local time", value=True)
         dfv = df_sched.copy()
-        dfv["Local"] = dfv["StartLocal"].dt.strftime("%a %d %b %H:%M")
-        dfv["UTC"] = pd.to_datetime(dfv["StartUTC"]).dt.strftime("%a %d %b %H:%M")
+        def _fmt(series):
+            ts = pd.to_datetime(series, utc=False, errors="coerce")
+            formatted = ts.dt.strftime("%a %d %b %H:%M")
+            return formatted.fillna("TBD")
+        dfv["Local"] = _fmt(dfv["StartLocal"])
+        dfv["UTC"] = _fmt(dfv["StartUTC"])
         st.dataframe(dfv[["EventName", "Session", "Local" if show_local else "UTC"]],
                      use_container_width=True, height=420)
 
@@ -150,29 +173,34 @@ with tab_schedule:
         st.markdown("#### Jump to Analysis")
 
         evs = sorted(df_sched["EventName"].unique().tolist())
+        current_event_title = slug_to_event_name(st.session_state["event"]) if st.session_state["event"] else None
+        default_event_idx = (
+            evs.index(current_event_title) if current_event_title in evs
+            else (evs.index(ns["EventName"]) if ns is not None and ns["EventName"] in evs else 0)
+        )
         choose_event = st.selectbox("Grand Prix", evs,
-                                    index=evs.index(ns["EventName"]) if ns is not None else 0,
+                                    index=default_event_idx,
                                     key="sched_jump_event")
+        new_event_slug = event_name_to_slug(choose_event)
+        if st.session_state.get("event") != new_event_slug:
+            st.session_state["event"] = new_event_slug
+            st.session_state["selected_turn"] = None
 
         gp_sessions = df_sched[df_sched["EventName"] == choose_event].sort_values("StartUTC")
         sess_codes = gp_sessions["SessionCode"].tolist()
-        default_code = "R" if "R" in sess_codes else ("Q" if "Q" in sess_codes else sess_codes[0])
-        choose_session = st.selectbox(
-            "Session",
-            [f"{row.Session} ({row.SessionCode})" for _, row in gp_sessions.iterrows()],
-            index=sess_codes.index(default_code) if default_code in sess_codes else 0,
-            key="sched_jump_session"
-        )
-
-        # --- FIXED BUTTON ---
-        if st.button("Go to Analysis"):
-            lbl = st.session_state["sched_jump_session"]
-            code = lbl.split("(")[-1].rstrip(")")
-            st.session_state["year"] = int(sched_year)
-            st.session_state["event"] = choose_event
-            st.session_state["session"] = code
-            st.session_state["selected_turn"] = None
-            st.experimental_rerun()
+        session_labels = {row.SessionCode: f"{row.Session} ({row.SessionCode})" for _, row in gp_sessions.iterrows()}
+        default_code = st.session_state.get("session")
+        if default_code not in sess_codes:
+            default_code = "R" if "R" in sess_codes else ("Q" if "Q" in sess_codes else (sess_codes[0] if sess_codes else None))
+        if sess_codes:
+            choose_session_code = st.selectbox(
+                "Session",
+                sess_codes,
+                index=sess_codes.index(default_code) if default_code in sess_codes else 0,
+                key="sched_jump_session",
+                format_func=lambda code: session_labels.get(code, code)
+            )
+            st.session_state["session"] = choose_session_code
 
 # ======================================================
 # ===============  🔍 ANALYSIS TAB  =====================
