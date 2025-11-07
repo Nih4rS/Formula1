@@ -1,20 +1,106 @@
 # utils/map_loader.py
 from __future__ import annotations
-import json, pathlib
+
+import json
+import pathlib
+from functools import lru_cache
+from typing import Dict
+
+import fastf1
+import pandas as pd
 import plotly.graph_objects as go
 
+from utils.events import slug_to_event_name
+
 DATA = pathlib.Path(__file__).resolve().parents[1] / "data"
+CACHE = pathlib.Path("fastf1_cache")
+CACHE.mkdir(exist_ok=True)
+fastf1.Cache.enable_cache(CACHE)
+
+SESSION_TRY_ORDER = ["Q", "SQ", "SS", "FP2", "FP3", "FP1", "R"]
 
 
-def load_map_data(year: str | int, event: str) -> dict:
-    """Load prebuilt JSONs for a GP. Returns dict keys: track_map, corners, sectors (if found)."""
-    base = DATA / str(year) / event
-    out: dict = {}
+def load_map_data(year: str | int, event_slug: str) -> dict:
+    """Load circuit assets; auto-build from FastF1 if files are missing."""
+    base = DATA / str(year) / event_slug
+    out = _read_map_dir(base)
+    if "track_map" not in out:
+        out.update(_auto_generate_map(year, event_slug))
+    return out
+
+
+def _read_map_dir(base: pathlib.Path) -> Dict[str, dict]:
+    payload: Dict[str, dict] = {}
     for name in ("track_map", "corners", "sectors"):
         fp = base / f"{name}.json"
         if fp.exists():
-            out[name] = json.loads(fp.read_text(encoding="utf-8"))
-    return out
+            try:
+                payload[name] = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+    return payload
+
+
+def _auto_generate_map(year: int | str, event_slug: str) -> Dict[str, dict]:
+    """Build map data via FastF1 and persist for reuse."""
+    bundle = _fetch_map_bundle(int(year), event_slug)
+    if not bundle:
+        return {}
+    base = DATA / str(year) / event_slug
+    base.mkdir(parents=True, exist_ok=True)
+    for name, content in bundle.items():
+        (base / f"{name}.json").write_text(json.dumps(content), encoding="utf-8")
+    return bundle
+
+
+@lru_cache(maxsize=32)
+def _fetch_map_bundle(year: int, event_slug: str) -> Dict[str, dict]:
+    session = _load_any_session(year, event_slug)
+    if session is None:
+        return {}
+    try:
+        fastest = session.laps.pick_fastest()
+        telemetry = fastest.get_telemetry()
+    except Exception:
+        return {}
+    if telemetry is None or telemetry.empty or not {"X", "Y"}.issubset(telemetry.columns):
+        return {}
+
+    bundle: Dict[str, dict] = {
+        "track_map": {"X": telemetry["X"].tolist(), "Y": telemetry["Y"].tolist()}
+    }
+
+    try:
+        ci = session.get_circuit_info()
+    except Exception:
+        ci = None
+
+    if ci is not None:
+        corners_df = getattr(ci, "corners", None)
+        if isinstance(corners_df, pd.DataFrame) and not corners_df.empty:
+            bundle["corners"] = corners_df.to_dict(orient="records")
+        sectors_df = getattr(ci, "sectors", None)
+        if (
+            isinstance(sectors_df, pd.DataFrame)
+            and not sectors_df.empty
+            and {"X", "Y"}.issubset(sectors_df.columns)
+        ):
+            bundle["sectors"] = sectors_df.to_dict(orient="records")
+
+    return bundle
+
+
+def _load_any_session(year: int, event_slug: str):
+    """Return first session with telemetry available."""
+    event_name = slug_to_event_name(event_slug)
+    for code in SESSION_TRY_ORDER:
+        try:
+            session = fastf1.get_session(year, event_name, code)
+            session.load(telemetry=True, laps=True, weather=False)
+            return session
+        except Exception:
+            continue
+    return None
 
 
 def build_track_figure(map_data: dict, event_name: str, selected_turn: int | None = None) -> go.Figure:

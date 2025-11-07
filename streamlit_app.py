@@ -16,18 +16,7 @@ from utils.lap_delta import lap_delta
 from utils.plotting import multi_line
 from utils.map_loader import load_map_data, build_track_figure
 from utils.schedule import fetch_schedule, next_session, countdown_str
-
-EVENT_NAME_OVERRIDES = {
-    "sao-paulo-grand-prix": "Sao Paulo Grand Prix",
-    "mexico-city-grand-prix": "Mexico City Grand Prix",
-    "las-vegas-grand-prix": "Las Vegas Grand Prix",
-}
-
-def slug_to_event_name(slug: str) -> str:
-    slug = slug.lower()
-    if slug in EVENT_NAME_OVERRIDES:
-        return EVENT_NAME_OVERRIDES[slug]
-    return " ".join(part.capitalize() for part in slug.replace("_", "-").split("-"))
+from utils.events import slug_to_event_name
 
 
 def format_timedelta(value) -> Optional[str]:
