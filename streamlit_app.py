@@ -261,6 +261,39 @@ with tab_analysis:
     ref_driver = driver_selection[0]
     cmp_multi = driver_selection[1:]
 
+    # --- Schedule preview ---
+    sched_preview = load_schedule(int(year))
+    if sched_preview.empty:
+        st.info("Schedule data unavailable for this season (connect FastF1 or add local fallback).")
+    else:
+        ns_preview = next_session(sched_preview)
+        if ns_preview is not None:
+            cols = st.columns([1, 1, 1, 1])
+            cols[0].metric("Next GP", ns_preview["EventName"])
+            cols[1].metric("Session", ns_preview["Session"])
+            cols[2].metric(
+                "Local",
+                ns_preview["StartLocal"].strftime("%a %d %b %H:%M") if pd.notna(ns_preview["StartLocal"]) else "TBD"
+            )
+            cols[3].metric(
+                "UTC",
+                ns_preview["StartUTC"].strftime("%a %d %b %H:%M") if pd.notna(ns_preview["StartUTC"]) else "TBD"
+            )
+        with st.expander(f"{year} season schedule", expanded=False):
+            df_preview = sched_preview.copy()
+            def _fmt(series):
+                ts = pd.to_datetime(series, errors="coerce")
+                formatted = ts.dt.strftime("%a %d %b %H:%M")
+                return formatted.fillna("TBD")
+            df_preview["Local"] = _fmt(df_preview["StartLocal"])
+            df_preview["UTC"] = _fmt(df_preview["StartUTC"])
+            st.dataframe(
+                df_preview[["EventName", "Session", "Local", "UTC"]],
+                use_container_width=True,
+                height=280
+            )
+        st.divider()
+
     # reset selected turn if event changed
     st.session_state["selected_turn"] = (
         st.session_state["selected_turn"] if st.session_state.get("_last_event") == event else None
