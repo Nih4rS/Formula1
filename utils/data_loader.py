@@ -1,11 +1,57 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 import json
 
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+AUTO_BUILD_MIN_YEAR = 2020
+_auto_build_running = False
+
+
+def _auto_populate_missing_years() -> None:
+    """Ensure data exists for every season from AUTO_BUILD_MIN_YEAR onward."""
+    global _auto_build_running
+    if _auto_build_running:
+        return
+
+    try:
+        existing = {
+            int(p.name)
+            for p in DATA_ROOT.iterdir()
+            if p.is_dir() and p.name.isdigit()
+        }
+    except FileNotFoundError:
+        existing = set()
+
+    current_year = max(datetime.now().year, AUTO_BUILD_MIN_YEAR)
+    target_years = [
+        year for year in range(AUTO_BUILD_MIN_YEAR, current_year + 1)
+        if year not in existing
+    ]
+    if not target_years:
+        return
+
+    try:
+        from etl.build_all import build
+    except Exception as exc:
+        print(f"[auto-build] Unable to import builder: {exc}")
+        return
+
+    _auto_build_running = True
+    try:
+        for year in target_years:
+            try:
+                print(f"[auto-build] Building telemetry for {year}")
+                build(year, year)
+            except Exception as err:
+                print(f"[auto-build] Failed building {year}: {err}")
+    finally:
+        _auto_build_running = False
 
 
 def _list_dirs(path: Path) -> List[str]:
@@ -15,6 +61,7 @@ def _list_dirs(path: Path) -> List[str]:
 
 
 def list_years() -> List[str]:
+    _auto_populate_missing_years()
     return _list_dirs(DATA_ROOT)
 
 
