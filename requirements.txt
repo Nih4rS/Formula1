@@ -4,3 +4,4 @@ pandas>=2.2.2
 numpy>=1.26.4
 fastf1>=3.4.0
 pyyaml>=6.0.2
+streamlit-plotly-events>=0.0.6
