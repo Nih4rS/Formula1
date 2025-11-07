@@ -248,6 +248,35 @@ Actions will run every Monday 04:00 UTC and on manual dispatch.
 ---
 
 ## Troubleshooting
+ 
+---
+ 
+## GitHub Pages static site
+ 
+This repo includes a Vite + React static site that reads the JSONs in `data/` and renders:
+ 
+- Circuit map with clickable turn markers
+- Speed vs distance overlay for reference + comparison drivers
+- Lap delta vs distance (reference minus comparison)
+ 
+Local dev:
+ 
+```bash
+npm ci
+npm run prepare:public   # copies data/ -> public/data
+npm run dev              # http://localhost:5173
+```
+ 
+Deploy to GitHub Pages:
+ 
+1) Ensure `.github/workflows/deploy_pages.yml` exists (included).
+2) Push to `main`. The workflow builds and deploys `dist/` to Pages.
+3) In repo Settings → Pages → Build and deployment → Source: GitHub Actions.
+ 
+Weekly data refresh:
+ 
+- `.github/workflows/weekly_data.yml` (included) runs every Monday 04:00 UTC.
+- It builds best-lap telemetry and circuit maps for 2020..current, writes small `events.json`/`sessions.json`/`drivers.json` indexes, and commits `data/`.
 
 * `ERROR: Could not open requirements file`
   Create `requirements.txt` in repo root and run `pip install -r requirements.txt`.
