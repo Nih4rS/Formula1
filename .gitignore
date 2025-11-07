@@ -38,14 +38,10 @@ tmp/
 temp/
 
 # --- Data policy
-# Ignore everything under data by default...
-data/*
-# ...but keep JSON outputs and docs you want to serve with the app
-!data/**/*.json
-!data/schema.md
-
-# keep JSON outputs and schema; ignore everything else in data/
-data/*
+# Keep JSON artifacts in git while excluding other heavy exports
+data/**
+!data/
+!data/**/
 !data/**/*.json
 !data/schema.md
 !data/.gitkeep
