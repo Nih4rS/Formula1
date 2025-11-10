@@ -1,7 +1,7 @@
 # utils/schedule.py
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Dict
 
 import pandas as pd
 import fastf1
@@ -49,6 +49,64 @@ def _localize(ts_utc: Optional[pd.Timestamp]) -> Optional[pd.Timestamp]:
     return ts_utc.tz_convert(None).to_pydatetime().astimezone()  # system local tz
 
 
+def _rows_from_generic_sessions(year: int, sched: pd.DataFrame) -> List[Dict]:
+    """Parse FastF1 schedule using generic Session1..Session5 fields.
+
+    Maps the session label to our canonical codes. Works well for seasons like 2022.
+    """
+    def label_to_code(label: str) -> Optional[str]:
+        lab = (label or "").strip().lower()
+        if not lab:
+            return None
+        if "practice 1" in lab:
+            return "FP1"
+        if "practice 2" in lab:
+            return "FP2"
+        if "practice 3" in lab:
+            return "FP3"
+        if lab == "qualifying" or "qualifying" in lab and "sprint" not in lab:
+            return "Q"
+        if lab == "race":
+            return "R"
+        if "sprint shootout" in lab:
+            return "SS"
+        if "sprint qualifying" in lab:
+            return "SQ"
+        if lab == "sprint" or lab.startswith("sprint"):
+            return "SPR"
+        return None
+
+    rows: List[Dict] = []
+    for _, ev in sched.iterrows():
+        event = str(ev.get("EventName", "")).strip()
+        country = str(ev.get("Country", ""))
+        location = str(ev.get("Location", ""))
+        for idx in range(1, 6):
+            label = ev.get(f"Session{idx}")
+            code = label_to_code(label) if isinstance(label, str) else None
+            if not code:
+                continue
+            dt_col = f"Session{idx}DateUtc"
+            ts_utc = pd.to_datetime(ev.get(dt_col), utc=True, errors="coerce")
+            if ts_utc is None or pd.isna(ts_utc):
+                # try non-UTC column
+                ts_local = pd.to_datetime(ev.get(f"Session{idx}Date"), utc=True, errors="coerce")
+                ts_utc = ts_local
+            if ts_utc is None or pd.isna(ts_utc):
+                continue
+            rows.append({
+                "Year": year,
+                "EventName": event,
+                "Country": country,
+                "Location": location,
+                "SessionCode": code,
+                "Session": _SESSION_FRIENDLY.get(code, code),
+                "StartUTC": ts_utc.to_pydatetime(),
+                "StartLocal": _localize(ts_utc)
+            })
+    return rows
+
+
 def fetch_schedule(year: int) -> pd.DataFrame:
     """Return tidy schedule with one row per session and both UTC and Local times.
 
@@ -64,31 +122,30 @@ def fetch_schedule(year: int) -> pd.DataFrame:
 
     if sched is None or sched.empty:
         return _fallback_schedule(year)
-
-    rows = []
-    for _, ev in sched.iterrows():
-        event = str(ev.get("EventName", "")).strip()
-        country = str(ev.get("Country", ""))
-        location = str(ev.get("Location", ""))
-        for code, col in _CODE_TO_COL.items():
-            if col not in ev or pd.isna(ev[col]):
-                continue
-            try:
+    # Prefer robust generic Session1..5 mapping (works for 2022 and many seasons)
+    rows = _rows_from_generic_sessions(year, sched)
+    if not rows:
+        # Fall back to legacy explicit columns map if present
+        for _, ev in sched.iterrows():
+            event = str(ev.get("EventName", "")).strip()
+            country = str(ev.get("Country", ""))
+            location = str(ev.get("Location", ""))
+            for code, col in _CODE_TO_COL.items():
+                if col not in ev or pd.isna(ev[col]):
+                    continue
                 ts_utc = pd.to_datetime(ev[col], utc=True, errors="coerce")
-            except Exception:
-                ts_utc = None
-            if ts_utc is None or pd.isna(ts_utc):
-                continue
-            rows.append({
-                "Year": year,
-                "EventName": event,
-                "Country": country,
-                "Location": location,
-                "SessionCode": code,
-                "Session": _SESSION_FRIENDLY.get(code, code),
-                "StartUTC": ts_utc.to_pydatetime(),
-                "StartLocal": _localize(ts_utc)
-            })
+                if ts_utc is None or pd.isna(ts_utc):
+                    continue
+                rows.append({
+                    "Year": year,
+                    "EventName": event,
+                    "Country": country,
+                    "Location": location,
+                    "SessionCode": code,
+                    "Session": _SESSION_FRIENDLY.get(code, code),
+                    "StartUTC": ts_utc.to_pydatetime(),
+                    "StartLocal": _localize(ts_utc)
+                })
 
     df = pd.DataFrame(rows)
     if df.empty:

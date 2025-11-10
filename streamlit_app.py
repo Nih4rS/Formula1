@@ -54,94 +54,8 @@ def format_timedelta(value) -> Optional[str]:
     sign = "-" if total < 0 else ""
     total = abs(total)
     minutes, seconds = divmod(total, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{sign}{int(hours):d}:{int(minutes):02d}:{seconds:06.3f}"
-    return f"{sign}{int(minutes):02d}:{seconds:06.3f}"
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def load_race_summary(year: int, event_slug: str) -> Dict[str, Any]:
-    """Fetch race classification + lap snapshots via FastF1 (cached)."""
-    event_name = slug_to_event_name(event_slug)
-    session = fastf1.get_session(year, event_name, "R")
-    session.load(results=True, laps=True, telemetry=False, weather=False)
-
-    summary: Dict[str, Any] = {"results": [], "laps": {}, "fastest": None}
-
-    if session.results is not None and not session.results.empty:
-        res = session.results.sort_values("Position")
-        for _, row in res.iterrows():
-            summary["results"].append({
-                "Pos": int(row["Position"]),
-                "Driver": row.get("Abbreviation") or row.get("Driver"),
-                "Team": row.get("TeamName"),
-                "Grid": int(row["GridPosition"]) if pd.notna(row.get("GridPosition")) else None,
-                "Status": row.get("Status"),
-                "Points": row.get("Points"),
-                "Time/Gap": format_timedelta(row.get("Time")),
-            })
-
-    laps = session.laps
-    if laps is not None and not laps.empty and "Position" in laps.columns:
-        lap_groups = laps.dropna(subset=["Position"]).groupby("LapNumber")
-        for lap_no, grp in lap_groups:
-            snapshot = []
-            grp = grp.sort_values("Position")
-            for _, row in grp.iterrows():
-                snapshot.append({
-                    "Pos": int(row["Position"]),
-                    "Driver": row.get("Driver") or row.get("Abbreviation"),
-                    "LapTime": format_timedelta(row.get("LapTime")),
-                    "Compound": row.get("Compound"),
-                    "Tyre": None if pd.isna(row.get("TyreLife")) else f"{int(row['TyreLife'])} laps",
-                })
-            summary["laps"][int(lap_no)] = snapshot
-
-    if laps is not None and not laps.empty:
-        try:
-            fastest = laps.pick_fastest()
-        except Exception:
-            fastest = None
-        if fastest is not None:
-            summary["fastest"] = {
-                "Driver": fastest.get("Driver"),
-                "Lap": int(fastest.get("LapNumber")),
-                "LapTime": format_timedelta(fastest.get("LapTime")),
-                "Compound": fastest.get("Compound"),
-            }
-    return summary
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def load_schedule(year: int) -> pd.DataFrame:
-    """Cached wrapper around fetch_schedule with graceful failure."""
-    try:
-        df = fetch_schedule(year)
-    except Exception:
-        return pd.DataFrame()
-    return df
-
-# ---------------------------
-# Page setup
-# ---------------------------
-st.set_page_config(page_title="F1 Lap Explorer", layout="wide")
-st.title("F1 Lap Explorer")
-st.caption("Compare best laps, speed traces, and turn-level telemetry with FastF1-derived data.")
-
-# Sticky defaults
-st.session_state.setdefault("year", None)
-st.session_state.setdefault("event", None)
-st.session_state.setdefault("session", None)
-st.session_state.setdefault("ref", None)
-st.session_state.setdefault("compares", [])
-st.session_state.setdefault("applied_year", None)
-st.session_state.setdefault("applied_event", None)
-st.session_state.setdefault("applied_session", None)
-st.session_state.setdefault("applied_drivers", [])
-st.session_state.setdefault("selected_turn", None)
-st.session_state.setdefault("turn_window_m", 120)
-
+    minutes = int(minutes)
+    return f"{sign}{minutes:02d}:{seconds:06.3f}"
 # ======================================================
 # TABS
 # ======================================================
@@ -153,18 +67,18 @@ tab_analysis, tab_schedule, tab_models = st.tabs(["🔍 Analysis", "🗓️ Sche
 with tab_schedule:
     st.subheader("Season Schedule")
 
-    years_all = [str(y) for y in (list_years() or list(range(2014, 2025 + 1)))]
-    current_year_value = st.session_state["year"] or years_all[0]
-    sched_year = st.selectbox(
-        "Year",
-        years_all,
-        index=years_all.index(current_year_value),
-        key="sched_year_selector"
-    )
-    if st.session_state.get("year") != sched_year:
-        st.session_state["year"] = sched_year
+    # Use main year selection from Analysis (sidebar Year). If missing, fall back to first available.
+    main_year = st.session_state.get("year")
+    if not main_year:
+        available_years = list_years()
+        if available_years:
+            main_year = available_years[0]
+            st.session_state["year"] = main_year
+        else:
+            st.info("No years available. Run ETL.")
+            st.stop()
 
-    df_sched = load_schedule(int(sched_year))
+    df_sched = fetch_schedule(int(main_year))
     if df_sched.empty:
         st.info("No schedule data available yet for this year.")
     else:
@@ -175,50 +89,32 @@ with tab_schedule:
                 st.metric("Next", ns['EventName'], help=ns['Session'])
             with cols[1]:
                 local_ts = ns['StartLocal']
-                local_fmt = local_ts.strftime("%a %d %b %H:%M") if pd.notna(local_ts) else "TBD"
-                st.metric("Local time", local_fmt)
+                st.metric("Local time", local_ts.strftime("%a %d %b %H:%M") if pd.notna(local_ts) else "TBD")
             with cols[2]:
                 utc_ts = ns['StartUTC']
-                utc_fmt = utc_ts.strftime("%a %d %b %H:%M") if pd.notna(utc_ts) else "TBD"
-                st.metric("UTC", utc_fmt)
+                st.metric("UTC", utc_ts.strftime("%a %d %b %H:%M") if pd.notna(utc_ts) else "TBD")
             with cols[3]:
                 st.metric("Session", ns['Session'])
             with cols[4]:
-                st.metric("Countdown", countdown_str(ns['StartUTC']) if pd.notna(utc_ts) else "TBD")
+                st.metric("Countdown", countdown_str(ns['StartUTC']) if pd.notna(ns['StartUTC']) else "TBD")
 
         st.markdown("### Full Schedule")
         show_local = st.toggle("Show local time", value=True)
         dfv = df_sched.copy()
-        def _fmt(series):
-            ts = pd.to_datetime(series, utc=False, errors="coerce")
-            formatted = ts.dt.strftime("%a %d %b %H:%M")
-            # If missing time in fallback schedule, show "Completed" when local data exists
-            val = formatted.copy()
-            for idx, v in val.items():
-                if pd.isna(ts.iloc[idx]) or v == "NaT":
-                    ev = df_sched.iloc[idx]["EventName"]
-                    code = df_sched.iloc[idx]["SessionCode"]
-                    base = pathlib.Path("data") / str(sched_year) / event_name_to_slug(ev) / code
-                    exists = base.exists() and any(base.glob("*_bestlap.json"))
-                    val.iloc[idx] = "Completed" if exists else "TBD"
-            return val
-        dfv["Local"] = _fmt(dfv["StartLocal"])
-        dfv["UTC"] = _fmt(dfv["StartUTC"])
-        st.dataframe(dfv[["EventName", "Session", "Local" if show_local else "UTC"]],
-                     use_container_width=True, height=420)
+        dfv['Local'] = [dt.strftime("%a %d %b %H:%M") if pd.notna(dt) else 'TBD' for dt in dfv['StartLocal']]
+        dfv['UTC'] = [dt.strftime("%a %d %b %H:%M") if pd.notna(dt) else 'TBD' for dt in dfv['StartUTC']]
+        st.dataframe(dfv[["EventName", "Session", "Local" if show_local else "UTC"]], use_container_width=True, height=420)
 
         st.divider()
         st.markdown("#### Jump to Analysis")
 
         evs = sorted(df_sched["EventName"].unique().tolist())
-        current_event_title = slug_to_event_name(st.session_state["event"]) if st.session_state["event"] else None
+        current_event_title = slug_to_event_name(st.session_state["event"]) if st.session_state.get("event") else None
         default_event_idx = (
             evs.index(current_event_title) if current_event_title in evs
             else (evs.index(ns["EventName"]) if ns is not None and ns["EventName"] in evs else 0)
         )
-        choose_event = st.selectbox("Grand Prix", evs,
-                                    index=default_event_idx,
-                                    key="sched_jump_event")
+        choose_event = st.selectbox("Grand Prix", evs, index=default_event_idx, key="sched_jump_event")
         new_event_slug = event_name_to_slug(choose_event)
         if st.session_state.get("event") != new_event_slug:
             st.session_state["event"] = new_event_slug
@@ -332,7 +228,7 @@ with tab_analysis:
     cmp_multi = driver_selection[1:]
 
     # --- Schedule preview ---
-    sched_preview = load_schedule(int(year))
+    sched_preview = fetch_schedule(int(year))
     if sched_preview.empty:
         st.info("Schedule data unavailable for this season (connect FastF1 or add local fallback).")
     else:
@@ -565,43 +461,7 @@ with tab_analysis:
                 if not drew:
                     st.info("No telemetry within the chosen radius. Increase radius or pick another turn.")
 
-    if session.upper() == "R":
-        st.markdown("---")
-        st.subheader("Race recap")
-        try:
-            race_summary = load_race_summary(int(year), event)
-        except Exception as exc:
-            st.info(f"Race summary unavailable: {exc}")
-        else:
-            results = race_summary.get("results", [])
-            fastest = race_summary.get("fastest")
-            if results:
-                winner = results[0]
-                cols = st.columns(3)
-                cols[0].metric("Winner", f"{winner.get('Driver')} ({winner.get('Team')})",
-                               help=f"Grid {winner.get('Grid')}")
-                cols[1].metric("Points", winner.get("Points", 0))
-                if fastest:
-                    cols[2].metric("Fastest lap",
-                                   f"L{fastest.get('Lap')} {fastest.get('Driver')}",
-                                   help=f"{fastest.get('LapTime')} on {fastest.get('Compound')}")
-                else:
-                    cols[2].metric("Fastest lap", "n/a")
-                st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
-            else:
-                st.info("No official classification available for this race.")
-
-            lap_snaps = race_summary.get("laps", {})
-            if lap_snaps:
-                lap_numbers = sorted(lap_snaps.keys())
-                if st.session_state.get("race_lap_slider") not in lap_numbers:
-                    st.session_state["race_lap_slider"] = lap_numbers[-1]
-                lap_choice = st.slider("Lap to inspect", lap_numbers[0], lap_numbers[-1],
-                                       key="race_lap_slider")
-                st.dataframe(pd.DataFrame(lap_snaps.get(lap_choice, [])),
-                             hide_index=True, use_container_width=True)
-            else:
-                st.info("Lap-by-lap placement data unavailable for this session.")
+    # (Race recap removed: load_race_summary not implemented yet)
 
 st.markdown("Tip: legend click toggles traces. Use the camera icon to download PNG.")
 
