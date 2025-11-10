@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ConstructorStanding,
   DriverStanding,
@@ -70,33 +70,47 @@ const formatCountdown = (start: Date | null, now: Date): string | null => {
   return parts.join(' ')
 }
 
-const OverviewPage: React.FC = () => {
+const isAbortError = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError'
+
+const OverviewPage: FC = () => {
   const [data, setData] = useState<OverviewData>(DEFAULT_OVERVIEW)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState<Date>(() => new Date())
+  const isMounted = useRef(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  useEffect(() => () => {
+    isMounted.current = false
+  }, [])
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    if (isMounted.current && !signal?.aborted) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const [schedule, nextRace, lastRace, driverStandings, constructorStandings] = await Promise.all([
-        fetchSeasonSchedule(),
-        fetchNextRace(),
-        fetchLastRaceResults(),
-        fetchDriverStandings(),
-        fetchConstructorStandings()
+        fetchSeasonSchedule('current', signal),
+        fetchNextRace('current', signal),
+        fetchLastRaceResults('current', signal),
+        fetchDriverStandings('current', signal),
+        fetchConstructorStandings('current', signal)
       ])
+      if (signal?.aborted || !isMounted.current) return
       setData({ schedule, nextRace, lastRace, driverStandings, constructorStandings })
     } catch (err) {
+      if (signal?.aborted || !isMounted.current || isAbortError(err)) return
       setError('Unable to load live championship data. Please try again in a moment.')
     } finally {
-      setLoading(false)
+      if (!signal?.aborted && isMounted.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    load()
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
   }, [load])
 
   useEffect(() => {
@@ -147,7 +161,7 @@ const OverviewPage: React.FC = () => {
               </div>
               <div>
                 <span className="label">Countdown</span>
-                <span>{countdown ?? '—'}</span>
+                <span>{countdown ?? '--'}</span>
               </div>
             </div>
             {data.nextRace.sessions.length ? (
@@ -238,7 +252,7 @@ const OverviewPage: React.FC = () => {
         <section className="panel latest-result">
           <header>
             <h2>Latest Grand Prix</h2>
-            {data.lastRace ? <span>{data.lastRace.race.name}</span> : <span>—</span>}
+            {data.lastRace ? <span>{data.lastRace.race.name}</span> : <span>--</span>}
           </header>
           {data.lastRace ? (
             <table>

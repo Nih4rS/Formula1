@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react'
+import { FC, useMemo } from 'react'
 import Plot from './Plotly'
+import { LapTelemetry } from '../utils/data'
 
 function lapDelta(refDist: number[], refCum: number[], cmpDist: number[], cmpCum: number[]) {
   const x: number[] = []
@@ -15,15 +16,15 @@ function lapDelta(refDist: number[], refCum: number[], cmpDist: number[], cmpCum
 }
 
 type Props = {
-  refLap: any | null
-  cmpLaps: Record<string, any>
+  refLap: LapTelemetry | null
+  cmpLaps: Record<string, LapTelemetry>
 }
 
-const DeltaChart: React.FC<Props> = ({ refLap, cmpLaps }) => {
+const DeltaChart: FC<Props> = ({ refLap, cmpLaps }) => {
   const traces = useMemo(() => {
     const out: any[] = []
     if (!refLap) return out
-    Object.values(cmpLaps).forEach((lap: any) => {
+    Object.values(cmpLaps).forEach((lap) => {
       if (!lap) return
       const { x, y } = lapDelta(refLap.distance_m || [], refLap.cum_lap_time_s || [], lap.distance_m || [], lap.cum_lap_time_s || [])
       out.push({ x, y, mode: 'lines', name: `${lap.driver || 'CMP'}` })

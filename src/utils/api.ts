@@ -161,8 +161,13 @@ export type RaceResult = {
   }>
 }
 
-async function fetchErgast<T>(path: string): Promise<T> {
-  const response = await fetch(`${ERGAST_BASE}${path}`)
+async function fetchErgast<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${ERGAST_BASE}${path}`, {
+    signal,
+    headers: {
+      accept: 'application/json'
+    }
+  })
   if (!response.ok) {
     throw new Error(`Ergast request failed: ${response.status}`)
   }
@@ -216,19 +221,19 @@ function toRaceSummary(race: ErgastRace): RaceSummary {
   }
 }
 
-export async function fetchSeasonSchedule(season: string | number = 'current'): Promise<RaceSummary[]> {
-  const data = await fetchErgast<ErgastRaceTable>(`/${season}.json?limit=100`)
+export async function fetchSeasonSchedule(season: string | number = 'current', signal?: AbortSignal): Promise<RaceSummary[]> {
+  const data = await fetchErgast<ErgastRaceTable>(`/${season}.json?limit=100`, signal)
   return data.MRData.RaceTable.Races.map(toRaceSummary)
 }
 
-export async function fetchNextRace(season: string | number = 'current'): Promise<RaceSummary | null> {
-  const data = await fetchErgast<ErgastRaceTable>(`/${season}/next.json`)
+export async function fetchNextRace(season: string | number = 'current', signal?: AbortSignal): Promise<RaceSummary | null> {
+  const data = await fetchErgast<ErgastRaceTable>(`/${season}/next.json`, signal)
   const race = data.MRData.RaceTable.Races[0]
   return race ? toRaceSummary(race) : null
 }
 
-export async function fetchLastRaceResults(season: string | number = 'current'): Promise<RaceResult | null> {
-  const data = await fetchErgast<ErgastResults>(`/${season}/last/results.json`)
+export async function fetchLastRaceResults(season: string | number = 'current', signal?: AbortSignal): Promise<RaceResult | null> {
+  const data = await fetchErgast<ErgastResults>(`/${season}/last/results.json`, signal)
   const race = data.MRData.RaceTable.Races[0]
   if (!race) return null
   const summary = toRaceSummary(race)
@@ -245,22 +250,22 @@ export async function fetchLastRaceResults(season: string | number = 'current'):
   return { race: summary, results }
 }
 
-export async function fetchDriverStandings(season: string | number = 'current'): Promise<DriverStanding[]> {
-  const data = await fetchErgast<ErgastStandingsTable<ErgastDriverStanding>>(`/${season}/driverStandings.json`)
+export async function fetchDriverStandings(season: string | number = 'current', signal?: AbortSignal): Promise<DriverStanding[]> {
+  const data = await fetchErgast<ErgastStandingsTable<ErgastDriverStanding>>(`/${season}/driverStandings.json`, signal)
   const firstList = data.MRData.StandingsTable.StandingsLists[0]
   const standings = firstList?.DriverStandings ?? []
   return standings.map(entry => ({
     position: Number.parseInt(entry.position, 10) || 0,
     driver: `${entry.Driver.givenName} ${entry.Driver.familyName}`.trim(),
     code: entry.Driver.code,
-    constructor: entry.Constructors?.[0]?.name ?? '—',
+  constructor: entry.Constructors?.[0]?.name ?? 'N/A',
     points: Number.parseFloat(entry.points) || 0,
     wins: Number.parseInt(entry.wins, 10) || 0
   }))
 }
 
-export async function fetchConstructorStandings(season: string | number = 'current'): Promise<ConstructorStanding[]> {
-  const data = await fetchErgast<ErgastStandingsTable<ErgastConstructorStanding>>(`/${season}/constructorStandings.json`)
+export async function fetchConstructorStandings(season: string | number = 'current', signal?: AbortSignal): Promise<ConstructorStanding[]> {
+  const data = await fetchErgast<ErgastStandingsTable<ErgastConstructorStanding>>(`/${season}/constructorStandings.json`, signal)
   const firstList = data.MRData.StandingsTable.StandingsLists[0]
   const standings = firstList?.ConstructorStandings ?? []
   return standings.map(entry => ({

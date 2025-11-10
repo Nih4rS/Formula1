@@ -1,15 +1,30 @@
-import React, { useState } from 'react'
+import { FC, Suspense, lazy, useEffect, useState } from 'react'
 import OverviewPage from './OverviewPage'
-import TelemetryExplorer from './TelemetryExplorer'
 import './App.css'
+
+const TelemetryExplorer = lazy(() => import('./TelemetryExplorer'))
 
 type TabKey = 'overview' | 'telemetry'
 
-const App: React.FC = () => {
+const LoadingPanel: FC<{ message: string }> = ({ message }) => (
+  <div className="panel loading-panel">
+    <div className="loading-spinner" aria-hidden />
+    <p>{message}</p>
+  </div>
+)
+
+const App: FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const [hasMountedTelemetry, setHasMountedTelemetry] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (activeTab === 'telemetry') setHasMountedTelemetry(true)
+  }, [activeTab])
 
   const tabButtonClass = (tab: TabKey) =>
     activeTab === tab ? 'nav-tab nav-tab--active' : 'nav-tab'
+
+  const shouldRenderTelemetry = activeTab === 'telemetry' || hasMountedTelemetry
 
   return (
     <div className="app-shell">
@@ -28,9 +43,13 @@ const App: React.FC = () => {
         <section className={activeTab === 'overview' ? 'tab-panel' : 'tab-panel tab-panel--hidden'}>
           <OverviewPage />
         </section>
-        <section className={activeTab === 'telemetry' ? 'tab-panel' : 'tab-panel tab-panel--hidden'}>
-          <TelemetryExplorer />
-        </section>
+        {shouldRenderTelemetry ? (
+          <section className={activeTab === 'telemetry' ? 'tab-panel' : 'tab-panel tab-panel--hidden'}>
+            <Suspense fallback={<LoadingPanel message="Loading telemetry workspace..." />}>
+              <TelemetryExplorer />
+            </Suspense>
+          </section>
+        ) : null}
       </main>
 
       <footer className="app-footer">
