@@ -59,82 +59,8 @@ def format_timedelta(value) -> Optional[str]:
 # ======================================================
 # TABS
 # ======================================================
-tab_analysis, tab_schedule, tab_models = st.tabs(["🔍 Analysis", "🗓️ Schedule", "🤖 Models (beta)"])
+tab_analysis, tab_models = st.tabs(["🔍 Analysis", "🤖 Models (beta)"])
 
-# ======================================================
-# ===============  🗓️  SCHEDULE TAB  ====================
-# ======================================================
-with tab_schedule:
-    st.subheader("Season Schedule")
-
-    # Use main year selection from Analysis (sidebar Year). If missing, fall back to first available.
-    main_year = st.session_state.get("year")
-    if not main_year:
-        available_years = list_years()
-        if available_years:
-            main_year = available_years[0]
-            st.session_state["year"] = main_year
-        else:
-            st.info("No years available. Run ETL.")
-            st.stop()
-
-    df_sched = fetch_schedule(int(main_year))
-    if df_sched.empty:
-        st.info("No schedule data available yet for this year.")
-    else:
-        ns = next_session(df_sched)
-        if ns is not None:
-            cols = st.columns([1, 2, 2, 2, 2])
-            with cols[0]:
-                st.metric("Next", ns['EventName'], help=ns['Session'])
-            with cols[1]:
-                local_ts = ns['StartLocal']
-                st.metric("Local time", local_ts.strftime("%a %d %b %H:%M") if pd.notna(local_ts) else "TBD")
-            with cols[2]:
-                utc_ts = ns['StartUTC']
-                st.metric("UTC", utc_ts.strftime("%a %d %b %H:%M") if pd.notna(utc_ts) else "TBD")
-            with cols[3]:
-                st.metric("Session", ns['Session'])
-            with cols[4]:
-                st.metric("Countdown", countdown_str(ns['StartUTC']) if pd.notna(ns['StartUTC']) else "TBD")
-
-        st.markdown("### Full Schedule")
-        show_local = st.toggle("Show local time", value=True)
-        dfv = df_sched.copy()
-        dfv['Local'] = [dt.strftime("%a %d %b %H:%M") if pd.notna(dt) else 'TBD' for dt in dfv['StartLocal']]
-        dfv['UTC'] = [dt.strftime("%a %d %b %H:%M") if pd.notna(dt) else 'TBD' for dt in dfv['StartUTC']]
-        st.dataframe(dfv[["EventName", "Session", "Local" if show_local else "UTC"]], use_container_width=True, height=420)
-
-        st.divider()
-        st.markdown("#### Jump to Analysis")
-
-        evs = sorted(df_sched["EventName"].unique().tolist())
-        current_event_title = slug_to_event_name(st.session_state["event"]) if st.session_state.get("event") else None
-        default_event_idx = (
-            evs.index(current_event_title) if current_event_title in evs
-            else (evs.index(ns["EventName"]) if ns is not None and ns["EventName"] in evs else 0)
-        )
-        choose_event = st.selectbox("Grand Prix", evs, index=default_event_idx, key="sched_jump_event")
-        new_event_slug = event_name_to_slug(choose_event)
-        if st.session_state.get("event") != new_event_slug:
-            st.session_state["event"] = new_event_slug
-            st.session_state["selected_turn"] = None
-
-        gp_sessions = df_sched[df_sched["EventName"] == choose_event].sort_values("StartUTC")
-        sess_codes = gp_sessions["SessionCode"].tolist()
-        session_labels = {row.SessionCode: f"{row.Session} ({row.SessionCode})" for _, row in gp_sessions.iterrows()}
-        default_code = st.session_state.get("session")
-        if default_code not in sess_codes:
-            default_code = "R" if "R" in sess_codes else ("Q" if "Q" in sess_codes else (sess_codes[0] if sess_codes else None))
-        if sess_codes:
-            choose_session_code = st.selectbox(
-                "Session",
-                sess_codes,
-                index=sess_codes.index(default_code) if default_code in sess_codes else 0,
-                key="sched_jump_session",
-                format_func=lambda code: session_labels.get(code, code)
-            )
-            st.session_state["session"] = choose_session_code
 
 # ======================================================
 # ===============  🔍 ANALYSIS TAB  =====================
@@ -232,10 +158,12 @@ with tab_analysis:
     if sched_preview.empty:
         st.info("Schedule data unavailable for this season (connect FastF1 or add local fallback).")
     else:
+        # sort ascending for next GP detection (fetch_schedule already chronological but be explicit)
+        sched_preview = sched_preview.sort_values("StartUTC")
         ns_preview = next_session(sched_preview)
         if ns_preview is not None:
             cols = st.columns([1, 1, 1, 1])
-            cols[0].metric("Next GP", ns_preview["EventName"])
+            cols[0].metric("Next GP", ns_preview["EventName"], help=ns_preview["Session"])
             cols[1].metric("Session", ns_preview["Session"])
             cols[2].metric(
                 "Local",
@@ -245,8 +173,8 @@ with tab_analysis:
                 "UTC",
                 ns_preview["StartUTC"].strftime("%a %d %b %H:%M") if pd.notna(ns_preview["StartUTC"]) else "TBD"
             )
-        with st.expander(f"{year} season schedule", expanded=False):
-            df_preview = sched_preview.copy()
+        with st.expander(f"{year} season schedule (latest first)", expanded=False):
+            df_preview = sched_preview.copy().sort_values("StartUTC", ascending=False)
             def _fmt(series):
                 ts = pd.to_datetime(series, errors="coerce")
                 formatted = ts.dt.strftime("%a %d %b %H:%M")
@@ -254,9 +182,9 @@ with tab_analysis:
             df_preview["Local"] = _fmt(df_preview["StartLocal"])
             df_preview["UTC"] = _fmt(df_preview["StartUTC"])
             st.dataframe(
-                df_preview[["EventName", "Session", "Local", "UTC"]],
+                df_preview[["StartUTC", "EventName", "Session", "Local", "UTC"]],
                 use_container_width=True,
-                height=280
+                height=320
             )
         st.divider()
 

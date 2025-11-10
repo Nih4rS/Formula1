@@ -150,9 +150,9 @@ def fetch_schedule(year: int) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if df.empty:
         return _fallback_schedule(year)
-    cat = pd.Categorical(df["SessionCode"], categories=_SESSION_ORDER, ordered=True)
-    df = df.assign(SessionOrder=cat).sort_values(["EventName", "SessionOrder"]).reset_index(drop=True)
-    return df.drop(columns=["SessionOrder"])
+    # Ensure chronological ordering for reliable next_session detection.
+    df = df.sort_values("StartUTC").reset_index(drop=True)
+    return df
 
 
 def next_session(df: pd.DataFrame, now: datetime | None = None) -> Optional[pd.Series]:

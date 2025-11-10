@@ -19,6 +19,8 @@ Race adds full lap-by-lap analysis with tyres, stints, positions, and gap to lea
  Apply / Reset filter workflow (no defaults) in both React and Streamlit UIs
  Weekly data refresh on GitHub Actions
  (NEW, experimental) Simple finish-position prediction model (RandomForest) using grid & qualifying data
+ (NEW) DuckDB accelerated metadata index (`data/f1.duckdb`) for fast driver/event/session filtering
+ (NEW) Per-driver best-lap metrics table for richer comparisons (lap time, speed stats, throttle/brake averages)
 
 ---
 
@@ -121,6 +123,9 @@ pip install -r requirements.txt
 # 4) sample dataset
 python etl/make_dataset.py etl/config.example.yaml
 
+# (Optional) build DuckDB metadata index for faster filtering
+python etl/build_db.py
+
 # 5) run app
 streamlit run streamlit_app.py
 # open http://localhost:8501
@@ -135,6 +140,7 @@ Build more data in a second terminal:
 source .venv/bin/activate
 python etl/build_all.py 2020 2020
 python etl/build_all.py 2021 2023
+python etl/build_db.py  # refresh DB after new data
 
 python - << 'PY'
 from etl.build_race import export_race
@@ -160,6 +166,12 @@ PY
   Also writes `session_summary.json` with simple classification and track status timeline.
  * `etl/build_maps.py`
    Auto-generates `track_map.json`, `corners.json`, `sectors.json` from fastest lap telemetry when missing.
+ * `etl/build_db.py`
+   Scans existing `data/` structure to build `data/f1.duckdb` with two tables:
+     - `driver_sessions(year,event_slug,event_name,session_code,driver,team,has_bestlap)`
+     - `schedule(year,event_slug,event_name,session_code,session,start_utc,start_local)`
+     - `bestlap_metrics(year,event_slug,event_name,session_code,driver,lap_time_s,distance_m,speed_min_kph,speed_avg_kph,speed_max_kph,throttle_mean_pct,brake_mean_pct,...)`
+   Enables instant filtering in Streamlit without directory crawling.
 
 ---
 
@@ -307,6 +319,7 @@ Weekly data refresh:
 
 * Streamlit sees only one year
   You probably built only one season. Run `build_all.py` for more ranges and refresh Streamlit.
+  If you added seasons, also rebuild the DB: `python etl/build_db.py`.
 
  * Apply button disabled
    Ensure all required selectors (Year, Grand Prix, Session, at least one Driver) are chosen before Apply.
@@ -336,12 +349,19 @@ Yes. Open a second terminal tab, activate the venv, run builders, then press `r`
  **How do I retrain the prediction model?**
  `python -c "from models.position import train_model; print(train_model(2020, 2024))"`
 
+**Why is filtering faster now?**
+Directory scans are replaced by indexed DuckDB queries when `data/f1.duckdb` exists. Rebuild after adding data: `python etl/build_db.py`.
+ You can also query aggregated lap metrics for analysis: `python -c "import duckdb; print(duckdb.connect('data/f1.duckdb').execute('SELECT * FROM bestlap_metrics LIMIT 5').fetchdf())"`
+
 - Add richer feature engineering (stint degradation, tyre strategy, min corner speeds)
 - Driver pace clustering & tier classification
 - Podium probability model
 - Turn-level performance comparison overlays in prediction features
 - Optional experiment tracking (MLflow / CSV ledger)
 - Docker image for unified deployment
+ - DuckDB-powered schedule & telemetry aggregation queries (future: stint + tyre strategy table)
+ - Race lap ingestion + stint summaries in DB
+ - Materialized Parquet extracts for heavy telemetry slices
 - Auto-build circuit maps on-demand in Streamlit UI
 - Accessibility polish (already includes `.sr-only` helper)
 

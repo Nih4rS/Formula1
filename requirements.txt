@@ -7,3 +7,4 @@ pyyaml>=6.0.2
 streamlit-plotly-events>=0.0.6
 scikit-learn>=1.5.2
 joblib>=1.4.2
+duckdb

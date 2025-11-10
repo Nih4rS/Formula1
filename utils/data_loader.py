@@ -62,14 +62,36 @@ def _list_dirs(path: Path) -> List[str]:
 
 def list_years() -> List[str]:
     _auto_populate_missing_years()
+    # Try DuckDB-backed listing first
+    try:
+        from utils.db import list_years_db
+        years = list_years_db()
+        if years:
+            return years
+    except Exception:
+        pass
     return _list_dirs(DATA_ROOT)
 
 
 def list_events(year: str) -> List[str]:
+    try:
+        from utils.db import list_events_db
+        evs = list_events_db(year)
+        if evs:
+            return evs
+    except Exception:
+        pass
     return _list_dirs(DATA_ROOT / year)
 
 
 def list_sessions(year: str, event: str) -> List[str]:
+    try:
+        from utils.db import list_sessions_db
+        sess = list_sessions_db(year, event)
+        if sess:
+            return sess
+    except Exception:
+        pass
     return _list_dirs(DATA_ROOT / year / event)
 
 
@@ -79,6 +101,15 @@ def list_drivers(year: int | str, event: str | None, session: str | None) -> lis
     """
     if not (year and event and session):
         return []
+
+    # Try DB first
+    try:
+        from utils.db import list_drivers_db
+        drivers_db = list_drivers_db(year, event, session)
+        if drivers_db:
+            return drivers_db
+    except Exception:
+        pass
 
     p = DATA_ROOT / str(year) / event / session
     if not p.exists():
