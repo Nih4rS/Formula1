@@ -54,15 +54,22 @@ const formatSpeed = (speed?: number): string => {
 
 const TelemetryExplorer: FC = () => {
   const [years, setYears] = useState<string[]>([])
-  const [events, setEvents] = useState<string[]>([])
-  const [sessions, setSessions] = useState<string[]>([])
-  const [drivers, setDrivers] = useState<string[]>([])
+  const [eventOptions, setEventOptions] = useState<string[]>([])
+  const [sessionOptions, setSessionOptions] = useState<string[]>([])
+  const [driverOptions, setDriverOptions] = useState<string[]>([])
+
+  const [formSeason, setFormSeason] = useState<string>('')
+  const [formGrandPrix, setFormGrandPrix] = useState<string>('')
+  const [formSession, setFormSession] = useState<string>('')
+  const [formReference, setFormReference] = useState<string>('')
+  const [formComparisons, setFormComparisons] = useState<string[]>([])
 
   const [season, setSeason] = useState<string | undefined>()
   const [grandPrix, setGrandPrix] = useState<string | undefined>()
   const [sessionCode, setSessionCode] = useState<string | undefined>()
   const [referenceDriver, setReferenceDriver] = useState<string | undefined>()
   const [comparisonDrivers, setComparisonDrivers] = useState<string[]>([])
+  const [appliedDrivers, setAppliedDrivers] = useState<string[]>([])
   const [selectedTurn, setSelectedTurn] = useState<number | undefined>()
 
   const [mapData, setMapData] = useState<TrackMapPayload | null>(null)
@@ -91,78 +98,91 @@ const TelemetryExplorer: FC = () => {
     return () => controller.abort()
   }, [])
 
+  // ----- Form-driven option fetching (no defaults preselected)
   useEffect(() => {
-    setGrandPrix(undefined)
-    setSessionCode(undefined)
-    setReferenceDriver(undefined)
-    setComparisonDrivers([])
-    setSelectedTurn(undefined)
-  }, [season])
-
-  useEffect(() => {
-    setSessionCode(undefined)
-    setReferenceDriver(undefined)
-    setComparisonDrivers([])
-    setSelectedTurn(undefined)
-  }, [grandPrix])
-
-  useEffect(() => {
-    setReferenceDriver(undefined)
-    setComparisonDrivers([])
-  }, [sessionCode])
-
-  useEffect(() => {
-    if (!season) {
-      setEvents([])
+    // when formSeason changes, fetch events list for the season
+    if (!formSeason) {
+      setEventOptions([])
+      setSessionOptions([])
+      setDriverOptions([])
+      setFormGrandPrix('')
+      setFormSession('')
+      setFormReference('')
+      setFormComparisons([])
       return
     }
     const controller = new AbortController()
-    setEvents([])
-    listEvents(season, controller.signal)
-      .then((data) => setEvents(data))
+    setEventOptions([])
+    setSessionOptions([])
+    setDriverOptions([])
+    listEvents(formSeason, controller.signal)
+      .then((data) => setEventOptions(data))
       .catch((error) => {
-        if (!isAbortError(error)) setEvents([])
+        if (!isAbortError(error)) setEventOptions([])
       })
     return () => controller.abort()
-  }, [season])
+  }, [formSeason])
 
   useEffect(() => {
-    if (!season || !grandPrix) {
-      setSessions([])
+    // when formGrandPrix changes, fetch sessions for that round
+    if (!formSeason || !formGrandPrix) {
+      setSessionOptions([])
+      setDriverOptions([])
+      setFormSession('')
+      setFormReference('')
+      setFormComparisons([])
       return
     }
     const controller = new AbortController()
-    setSessions([])
-    listSessions(season, grandPrix, controller.signal)
-      .then((data) => setSessions(data))
+    setSessionOptions([])
+    setDriverOptions([])
+    listSessions(formSeason, formGrandPrix, controller.signal)
+      .then((data) => setSessionOptions(data))
       .catch((error) => {
-        if (!isAbortError(error)) setSessions([])
+        if (!isAbortError(error)) setSessionOptions([])
       })
     return () => controller.abort()
-  }, [season, grandPrix])
+  }, [formSeason, formGrandPrix])
 
+  useEffect(() => {
+    // when formSession changes, fetch drivers for that session
+    if (!formSeason || !formGrandPrix || !formSession) {
+      setDriverOptions([])
+      setFormReference('')
+      setFormComparisons([])
+      return
+    }
+    const controller = new AbortController()
+    setDriverOptions([])
+    listDrivers(formSeason, formGrandPrix, formSession, controller.signal)
+      .then((data) => setDriverOptions(data))
+      .catch((error) => {
+        if (!isAbortError(error)) setDriverOptions([])
+      })
+    return () => controller.abort()
+  }, [formSeason, formGrandPrix, formSession])
+
+  // When filters are applied (season, grandPrix, sessionCode), fetch drivers for the applied selection
   useEffect(() => {
     if (!season || !grandPrix || !sessionCode) {
-      setDrivers([])
+      setAppliedDrivers([])
       return
     }
     const controller = new AbortController()
-    setDrivers([])
+    setAppliedDrivers([])
     listDrivers(season, grandPrix, sessionCode, controller.signal)
-      .then((data) => setDrivers(data))
+      .then((data) => setAppliedDrivers(data))
       .catch((error) => {
-        if (!isAbortError(error)) setDrivers([])
+        if (!isAbortError(error)) setAppliedDrivers([])
       })
     return () => controller.abort()
   }, [season, grandPrix, sessionCode])
 
-  useEffect(() => {
-    if (!drivers.length) {
-      setReferenceDriver(undefined)
-      return
-    }
-    setReferenceDriver((prev) => (prev && drivers.includes(prev) ? prev : drivers[0]))
-  }, [drivers])
+  // ----- End form option fetching
+
+  // (Replaced by applied-drivers effect above)
+
+  // Do not auto-select any driver by default; when the reference driver changes, drop it from comparisons
 
   useEffect(() => {
     if (!referenceDriver) return
@@ -170,8 +190,9 @@ const TelemetryExplorer: FC = () => {
   }, [referenceDriver])
 
   useEffect(() => {
-    setComparisonDrivers((prev) => prev.filter((driver) => drivers.includes(driver)))
-  }, [drivers])
+    // keep applied comparison list consistent with available applied drivers
+    setComparisonDrivers((prev) => prev.filter((driver) => appliedDrivers.includes(driver)))
+  }, [appliedDrivers])
 
   useEffect(() => {
     if (!season || !grandPrix || !sessionCode) {
@@ -181,7 +202,7 @@ const TelemetryExplorer: FC = () => {
       setLeaderboardWarning(null)
       return
     }
-    if (!drivers.length) {
+    if (!appliedDrivers.length) {
       setLeaderboard([])
       setLeaderboardLoading(false)
       setLeaderboardError(null)
@@ -192,7 +213,7 @@ const TelemetryExplorer: FC = () => {
     setLeaderboardLoading(true)
     setLeaderboardError(null)
     setLeaderboardWarning(null)
-    const requests = drivers.map(async (driver) => {
+    const requests = appliedDrivers.map(async (driver) => {
       try {
         const lap = await loadLap(season, grandPrix, sessionCode, driver, controller.signal)
         return { driver, lap }
@@ -251,7 +272,7 @@ const TelemetryExplorer: FC = () => {
         if (!controller.signal.aborted) setLeaderboardLoading(false)
       })
     return () => controller.abort()
-  }, [season, grandPrix, sessionCode, drivers])
+  }, [season, grandPrix, sessionCode, appliedDrivers])
 
   useEffect(() => {
     if (!season || !grandPrix) {
@@ -354,14 +375,15 @@ const TelemetryExplorer: FC = () => {
     return () => controller.abort()
   }, [season, grandPrix, sessionCode, comparisonDrivers, referenceDriver])
 
-  const comparisonOptions = useMemo(
-    () => drivers.filter((driver) => driver !== referenceDriver),
-    [drivers, referenceDriver]
+  // Form comparison options depend on form selections
+  const formComparisonOptions = useMemo(
+    () => driverOptions.filter((driver) => driver !== formReference),
+    [driverOptions, formReference]
   )
 
   const comparisonSize = useMemo(
-    () => Math.min(6, Math.max(2, comparisonOptions.length || 2)),
-    [comparisonOptions.length]
+    () => Math.min(6, Math.max(2, formComparisonOptions.length || 2)),
+    [formComparisonOptions.length]
   )
 
   const eventTitle = useMemo(() => {
@@ -388,24 +410,33 @@ const TelemetryExplorer: FC = () => {
   const lapCountLabel = leaderboardLoading ? 'Loading...' : String(leaderboard.length)
 
   const handleSeasonChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setSeason(event.target.value || undefined)
+    setFormSeason(event.target.value)
   }
 
   const handleEventChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setGrandPrix(event.target.value || undefined)
+    setFormGrandPrix(event.target.value)
   }
 
   const handleSessionChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setSessionCode(event.target.value || undefined)
+    setFormSession(event.target.value)
   }
 
   const handleReferenceChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setReferenceDriver(event.target.value || undefined)
+    setFormReference(event.target.value)
   }
 
   const handleComparisonChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const unique = Array.from(new Set(Array.from(event.target.selectedOptions).map((option) => option.value)))
-    setComparisonDrivers(unique.filter((driver) => driver && driver !== referenceDriver))
+    setFormComparisons(unique.filter((driver) => driver && driver !== formReference))
+  }
+
+  const applyFilters = () => {
+    setSeason(formSeason || undefined)
+    setGrandPrix(formGrandPrix || undefined)
+    setSessionCode(formSession || undefined)
+    setReferenceDriver(formReference || undefined)
+    setComparisonDrivers(formComparisons.filter((d) => d && d !== formReference))
+    setSelectedTurn(undefined)
   }
 
   return (
@@ -418,7 +449,7 @@ const TelemetryExplorer: FC = () => {
       <div className="telemetry-controls">
         <label>
           Season
-          <select value={season || ''} onChange={handleSeasonChange} disabled={!years.length}>
+          <select value={formSeason} onChange={handleSeasonChange} disabled={!years.length}>
             <option value="">Select season</option>
             {years.map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -428,9 +459,9 @@ const TelemetryExplorer: FC = () => {
 
         <label>
           Grand Prix
-          <select value={grandPrix || ''} onChange={handleEventChange} disabled={!season || !events.length}>
+          <select value={formGrandPrix} onChange={handleEventChange} disabled={!formSeason || !eventOptions.length}>
             <option value="">Select round</option>
-            {events.map((eventSlug) => (
+            {eventOptions.map((eventSlug) => (
               <option key={eventSlug} value={eventSlug}>{eventSlug.replace(/-/g, ' ')}</option>
             ))}
           </select>
@@ -438,9 +469,9 @@ const TelemetryExplorer: FC = () => {
 
         <label>
           Session
-          <select value={sessionCode || ''} onChange={handleSessionChange} disabled={!grandPrix || !sessions.length}>
+          <select value={formSession} onChange={handleSessionChange} disabled={!formGrandPrix || !sessionOptions.length}>
             <option value="">Select session</option>
-            {sessions.map((code) => (
+            {sessionOptions.map((code) => (
               <option key={code} value={code}>{sessionLabels[code] ?? code}</option>
             ))}
           </select>
@@ -448,9 +479,9 @@ const TelemetryExplorer: FC = () => {
 
         <label>
           Reference Driver
-          <select value={referenceDriver || ''} onChange={handleReferenceChange} disabled={!drivers.length}>
+          <select value={formReference} onChange={handleReferenceChange} disabled={!driverOptions.length}>
             <option value="">Select driver</option>
-            {drivers.map((driver) => (
+            {driverOptions.map((driver) => (
               <option key={driver} value={driver}>{driver}</option>
             ))}
           </select>
@@ -461,22 +492,29 @@ const TelemetryExplorer: FC = () => {
           <select
             multiple
             size={comparisonSize}
-            value={comparisonDrivers}
+            value={formComparisons}
             onChange={handleComparisonChange}
-            disabled={!comparisonOptions.length}
+            disabled={!formComparisonOptions.length}
           >
-            {comparisonOptions.map((driver) => (
+            {formComparisonOptions.map((driver) => (
               <option key={driver} value={driver}>{driver}</option>
             ))}
           </select>
         </label>
+
+        <div>
+          <span className="sr-only">Apply</span>
+          <button type="button" className="nav-tab" onClick={applyFilters} disabled={!formSeason || !formGrandPrix || !formSession}>
+            Apply
+          </button>
+        </div>
       </div>
 
       <div className="telemetry-summary">
         <span className="telemetry-pill">Season <strong>{season ?? '--'}</strong></span>
         <span className="telemetry-pill">Event <strong>{eventTitle ?? '--'}</strong></span>
         <span className="telemetry-pill">Session <strong>{sessionName ?? '--'}</strong></span>
-        <span className="telemetry-pill">Drivers <strong>{drivers.length}</strong></span>
+  <span className="telemetry-pill">Drivers <strong>{appliedDrivers.length}</strong></span>
         <span className="telemetry-pill">Lap files <strong>{lapCountLabel}</strong></span>
       </div>
 
