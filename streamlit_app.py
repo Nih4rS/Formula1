@@ -19,6 +19,29 @@ from utils.schedule import fetch_schedule, next_session, countdown_str
 from utils.events import slug_to_event_name, event_name_to_slug
 
 
+def _reset_filters_and_cache():
+    # Clear selection state and any cached data so UI reflects latest code/choices
+    for k in [
+        "year",
+        "event",
+        "session",
+        "driver_selection",
+        "applied_year",
+        "applied_event",
+        "applied_session",
+        "applied_drivers",
+        "selected_turn",
+        "_last_event",
+    ]:
+        if k in st.session_state:
+            del st.session_state[k]
+    try:
+        st.cache_data.clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    st.rerun()
+
+
 def format_timedelta(value) -> Optional[str]:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
@@ -110,6 +133,10 @@ st.session_state.setdefault("event", None)
 st.session_state.setdefault("session", None)
 st.session_state.setdefault("ref", None)
 st.session_state.setdefault("compares", [])
+st.session_state.setdefault("applied_year", None)
+st.session_state.setdefault("applied_event", None)
+st.session_state.setdefault("applied_session", None)
+st.session_state.setdefault("applied_drivers", [])
 st.session_state.setdefault("selected_turn", None)
 st.session_state.setdefault("turn_window_m", 120)
 
@@ -213,50 +240,82 @@ with tab_analysis:
         st.error("No data found. Run ETL to populate /data.")
         st.stop()
 
-    if st.session_state["year"] not in years:
-        st.session_state["year"] = years[0]
+    placeholder = "— Select —"
 
-    year = st.sidebar.selectbox("Year", years,
-                                index=years.index(st.session_state["year"]), key="year")
+    # Year selector (no default)
+    year_options = [placeholder] + years
+    year_label = st.sidebar.selectbox(
+        "Year",
+        year_options,
+        index=(year_options.index(st.session_state["year"]) if st.session_state["year"] in years else 0),
+        key="year_select"
+    )
+    year = None if year_label == placeholder else year_label
+    st.session_state["year"] = year
 
-    events = list_events(year)
-    if not events:
-        st.error("No Grands Prix found for this year.")
-        st.stop()
+    # GP selector
+    events = list_events(year) if year else []
+    event_options = [placeholder] + events
+    event_label = st.sidebar.selectbox(
+        "Grand Prix",
+        event_options,
+        index=(event_options.index(st.session_state["event"]) if st.session_state["event"] in events else 0),
+        key="event_select",
+        disabled=not bool(year)
+    )
+    event = None if event_label == placeholder else event_label
+    st.session_state["event"] = event
 
-    if st.session_state["event"] not in events:
-        st.session_state["event"] = events[0]
-    event = st.sidebar.selectbox("Grand Prix", events,
-                                 index=events.index(st.session_state["event"]), key="event")
+    # Session selector
+    sessions = list_sessions(year, event) if (year and event) else []
+    session_options = [placeholder] + sessions
+    session_label = st.sidebar.selectbox(
+        "Session",
+        session_options,
+        index=(session_options.index(st.session_state["session"]) if st.session_state["session"] in sessions else 0),
+        key="session_select",
+        disabled=not bool(event)
+    )
+    session = None if session_label == placeholder else session_label
+    st.session_state["session"] = session
 
-    sessions = list_sessions(year, event)
-    if not sessions:
-        st.warning("No sessions found for this event in /data. Run ETL or pick another GP.")
-        st.stop()
-
-    if st.session_state["session"] not in sessions:
-        st.session_state["session"] = sessions[0]
-    session = st.sidebar.selectbox("Session", sessions,
-                                   index=sessions.index(st.session_state["session"]), key="session")
-
-    drivers = list_drivers(year, event, session)
-    if len(drivers) < 2:
-        st.warning("Not enough driver data available for this session.")
-        st.stop()
-
+    # Drivers (no default). Allow picking 1+ and we’ll handle comparisons accordingly.
+    drivers = list_drivers(year, event, session) if (year and event and session) else []
     stored_selection = [d for d in st.session_state.get("driver_selection", []) if d in drivers]
-    if len(stored_selection) < 2:
-        stored_selection = drivers[:min(3, len(drivers))]
-        st.session_state["driver_selection"] = stored_selection
     driver_selection = st.sidebar.multiselect(
         "Drivers (first = reference)",
         drivers,
         default=stored_selection,
-        key="driver_selection"
+        key="driver_selection",
+        disabled=not bool(session)
     )
-    if len(driver_selection) < 2:
-        st.sidebar.warning("Pick at least two drivers to compare.")
+
+    # Apply/Reset buttons in the sidebar
+    can_apply = bool(year and event and session and driver_selection)
+    if st.sidebar.button("Apply", type="primary", disabled=not can_apply, use_container_width=True):
+        st.session_state["applied_year"] = year
+        st.session_state["applied_event"] = event
+        st.session_state["applied_session"] = session
+        st.session_state["applied_drivers"] = driver_selection
+        st.rerun()
+
+    if st.sidebar.button("Reset filters", use_container_width=True):
+        _reset_filters_and_cache()
+
+    # Use applied filters for analysis; if none, prompt and stop.
+    applied_year = st.session_state.get("applied_year")
+    applied_event = st.session_state.get("applied_event")
+    applied_session = st.session_state.get("applied_session")
+    applied_drivers = st.session_state.get("applied_drivers", [])
+
+    if not (applied_year and applied_event and applied_session and applied_drivers):
+        st.info("Pick Year, Grand Prix, Session, select drivers, then click Apply to load analysis.")
         st.stop()
+
+    year = applied_year
+    event = applied_event
+    session = applied_session
+    driver_selection = applied_drivers
 
     ref_driver = driver_selection[0]
     cmp_multi = driver_selection[1:]
