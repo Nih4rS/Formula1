@@ -15,7 +15,8 @@ from utils.data_loader import list_years, list_events, list_sessions, list_drive
 from utils.lap_delta import lap_delta
 from utils.plotting import multi_line
 from utils.map_loader import load_map_data, build_track_figure
-from models.position import ensure_model, predict_for_race
+from models.position import ensure_model as ensure_pos_model, predict_for_race
+from models.podium import ensure_model as ensure_podium_model, predict_proba_for_race
 from utils.schedule import fetch_schedule, next_session, countdown_str
 from utils.events import slug_to_event_name, event_name_to_slug
 
@@ -620,7 +621,7 @@ with tab_models:
     if st.button("Train / Ensure model"):
         with st.spinner("Training model (may take a few minutes)..."):
             try:
-                meta = ensure_model(int(y_start), int(y_end))
+                meta = ensure_pos_model(int(y_start), int(y_end))
                 st.success(f"Model ready. MAE ≈ {meta.get('mae', 'n/a'):.2f} on holdout.")
                 st.json(meta)
             except Exception as exc:
@@ -639,6 +640,19 @@ with tab_models:
                     dfp = predict_for_race(int(applied_year), applied_event)
                 except Exception as exc:
                     st.error(f"Prediction failed: {exc}")
+                else:
+                    if dfp.empty:
+                        st.info("No race data available to build features.")
+                    else:
+                        st.dataframe(dfp, use_container_width=True)
+
+        if st.button("Podium probabilities (Top 3)"):
+            with st.spinner("Predicting podium probabilities..."):
+                try:
+                    ensure_podium_model(int(y_start), int(y_end))
+                    dfp = predict_proba_for_race(int(applied_year), applied_event)
+                except Exception as exc:
+                    st.error(f"Podium prediction failed: {exc}")
                 else:
                     if dfp.empty:
                         st.info("No race data available to build features.")
