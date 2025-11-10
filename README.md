@@ -10,12 +10,15 @@ Race adds full lap-by-lap analysis with tyres, stints, positions, and gap to lea
 
 ## Features
 
-* Compare drivers on lap delta vs distance and speed traces
-* Throttle and brake overlays
-* Race tab with position vs lap, tyre stints, and gap to leader
-* Local cache for FastF1 data
-* JSON data in `data/` for reproducible dashboards
-* Optional weekly refresh on GitHub Actions
+ Compare drivers on lap delta vs distance and speed traces
+ Throttle and brake overlays & per-turn zoom
+ Race recap: classification, fastest lap, lap-by-lap placement snapshots
+ Circuit maps with corner + sector overlays (auto-built from FastF1 laps)
+ Local cache for FastF1 data (`fastf1_cache/`)
+ JSON data in `data/` for reproducible dashboards & static site
+ Apply / Reset filter workflow (no defaults) in both React and Streamlit UIs
+ Weekly data refresh on GitHub Actions
+ (NEW, experimental) Simple finish-position prediction model (RandomForest) using grid & qualifying data
 
 ---
 
@@ -121,6 +124,9 @@ python etl/make_dataset.py etl/config.example.yaml
 # 5) run app
 streamlit run streamlit_app.py
 # open http://localhost:8501
+
+ If you plan to use the prediction model features (optional):
+ python -c "from models.position import ensure_model; print(ensure_model(2020, 2024))"
 ```
 
 Build more data in a second terminal:
@@ -152,6 +158,8 @@ PY
 * `etl/build_race.py`
   Writes full lap-by-lap JSON per driver for Race only: lap times, sectors, position, pit flags, compound, tyre life, stints, cumulative time.
   Also writes `session_summary.json` with simple classification and track status timeline.
+ * `etl/build_maps.py`
+   Auto-generates `track_map.json`, `corners.json`, `sectors.json` from fastest lap telemetry when missing.
 
 ---
 
@@ -166,6 +174,9 @@ PY
 
 Grand Prix folder names are lowercase and hyphenated.
 Example: `data/2020/italian-grand-prix/Q/VER_bestlap.json`
+
+ Map assets (built lazily on demand if absent):
+ `data/<year>/<grand-prix>/track_map.json`, `corners.json`, `sectors.json`
 
 ---
 
@@ -297,6 +308,12 @@ Weekly data refresh:
 * Streamlit sees only one year
   You probably built only one season. Run `build_all.py` for more ranges and refresh Streamlit.
 
+ * Apply button disabled
+   Ensure all required selectors (Year, Grand Prix, Session, at least one Driver) are chosen before Apply.
+
+ * Circuit map shows warning "No map data found"
+   Run: `python etl/build_maps.py <year>` or click the map build action (to be added) in future versions.
+
 * 2014–2017 telemetry
   Per-distance telemetry for best-lap charts is incomplete in older seasons. Races still provide usable lap tables and positions for many events. Use `build_race.py` for those.
 
@@ -312,6 +329,21 @@ Race analysis needs tyres, stints, positions, gaps, and cumulative times per lap
 
 **Can I run the builders while Streamlit is open**
 Yes. Open a second terminal tab, activate the venv, run builders, then press `r` in the browser.
+
+ **How does the prediction model work?**
+ Currently a lightweight RandomForest regressor using starting grid and qualifying position to estimate finishing position. It is a baseline to extend with richer telemetry-derived features.
+
+ **How do I retrain the prediction model?**
+ `python -c "from models.position import train_model; print(train_model(2020, 2024))"`
+
+- Add richer feature engineering (stint degradation, tyre strategy, min corner speeds)
+- Driver pace clustering & tier classification
+- Podium probability model
+- Turn-level performance comparison overlays in prediction features
+- Optional experiment tracking (MLflow / CSV ledger)
+- Docker image for unified deployment
+- Auto-build circuit maps on-demand in Streamlit UI
+- Accessibility polish (already includes `.sr-only` helper)
 
 **Can I delete old data and rebuild**
 Yes. If you used a resumable state file, remove it before a clean rebuild.

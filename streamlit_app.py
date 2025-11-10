@@ -15,6 +15,7 @@ from utils.data_loader import list_years, list_events, list_sessions, list_drive
 from utils.lap_delta import lap_delta
 from utils.plotting import multi_line
 from utils.map_loader import load_map_data, build_track_figure
+from models.position import ensure_model, predict_for_race
 from utils.schedule import fetch_schedule, next_session, countdown_str
 from utils.events import slug_to_event_name, event_name_to_slug
 
@@ -143,7 +144,7 @@ st.session_state.setdefault("turn_window_m", 120)
 # ======================================================
 # TABS
 # ======================================================
-tab_analysis, tab_schedule = st.tabs(["🔍 Analysis", "🗓️ Schedule"])
+tab_analysis, tab_schedule, tab_models = st.tabs(["🔍 Analysis", "🗓️ Schedule", "🤖 Models (beta)"])
 
 # ======================================================
 # ===============  🗓️  SCHEDULE TAB  ====================
@@ -190,7 +191,16 @@ with tab_schedule:
         def _fmt(series):
             ts = pd.to_datetime(series, utc=False, errors="coerce")
             formatted = ts.dt.strftime("%a %d %b %H:%M")
-            return formatted.fillna("TBD")
+            # If missing time in fallback schedule, show "Completed" when local data exists
+            val = formatted.copy()
+            for idx, v in val.items():
+                if pd.isna(ts.iloc[idx]) or v == "NaT":
+                    ev = df_sched.iloc[idx]["EventName"]
+                    code = df_sched.iloc[idx]["SessionCode"]
+                    base = pathlib.Path("data") / str(sched_year) / event_name_to_slug(ev) / code
+                    exists = base.exists() and any(base.glob("*_bestlap.json"))
+                    val.iloc[idx] = "Completed" if exists else "TBD"
+            return val
         dfv["Local"] = _fmt(dfv["StartLocal"])
         dfv["UTC"] = _fmt(dfv["StartUTC"])
         st.dataframe(dfv[["EventName", "Session", "Local" if show_local else "UTC"]],
@@ -365,7 +375,15 @@ with tab_analysis:
 
     map_data = load_map_data(year, event)
     if not map_data:
-        st.warning("No map data found. Run: `python etl/build_maps.py <year>`.")
+        st.warning("No map data found. You can attempt to auto-build it now.")
+        if st.button("Build map now", key="build_map_now"):
+            with st.spinner("Building map from telemetry..."):
+                try:
+                    _ = load_map_data(year, event)
+                    st.cache_data.clear()  # type: ignore[attr-defined]
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Map build failed: {exc}")
         fig_map = None
         clicked = []
     else:
@@ -585,3 +603,46 @@ with tab_analysis:
                 st.info("Lap-by-lap placement data unavailable for this session.")
 
 st.markdown("Tip: legend click toggles traces. Use the camera icon to download PNG.")
+
+# ======================================================
+# ==================  🤖 MODELS (beta)  =================
+# ======================================================
+with tab_models:
+    st.subheader("Finish position prediction (baseline)")
+    st.caption("A simple RandomForest regressor using Grid and Qualifying position as features.")
+
+    colA, colB = st.columns(2)
+    with colA:
+        y_start = st.number_input("Train range: start year", min_value=2018, max_value=2025, value=2020, step=1)
+    with colB:
+        y_end = st.number_input("Train range: end year", min_value=2018, max_value=2025, value=2024, step=1)
+
+    if st.button("Train / Ensure model"):
+        with st.spinner("Training model (may take a few minutes)..."):
+            try:
+                meta = ensure_model(int(y_start), int(y_end))
+                st.success(f"Model ready. MAE ≈ {meta.get('mae', 'n/a'):.2f} on holdout.")
+                st.json(meta)
+            except Exception as exc:
+                st.error(f"Training failed: {exc}")
+
+    st.divider()
+
+    # Use currently selected filters (if applied) to run predictions on a race
+    applied_year = st.session_state.get("applied_year")
+    applied_event = st.session_state.get("applied_event")
+    applied_session = st.session_state.get("applied_session")
+    if applied_year and applied_event and (applied_session or "R"):
+        if st.button("Predict current race grid → finish order"):
+            with st.spinner("Predicting..."):
+                try:
+                    dfp = predict_for_race(int(applied_year), applied_event)
+                except Exception as exc:
+                    st.error(f"Prediction failed: {exc}")
+                else:
+                    if dfp.empty:
+                        st.info("No race data available to build features.")
+                    else:
+                        st.dataframe(dfp, use_container_width=True)
+    else:
+        st.info("Select Year, Grand Prix and Session in Analysis tab and click Apply to enable predictions.")
