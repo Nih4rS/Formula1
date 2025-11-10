@@ -77,10 +77,17 @@ with tab_analysis:
 
     # Year selector (no default)
     year_options = [placeholder] + years
+    current_year_val = st.session_state.get("year")
+    year_index = 0
+    if current_year_val and current_year_val in years:
+        try:
+            year_index = year_options.index(current_year_val)
+        except ValueError:
+            year_index = 0
     year_label = st.sidebar.selectbox(
         "Year",
         year_options,
-        index=(year_options.index(st.session_state["year"]) if st.session_state["year"] in years else 0),
+        index=year_index,
         key="year_select"
     )
     year = None if year_label == placeholder else year_label
@@ -89,10 +96,17 @@ with tab_analysis:
     # GP selector
     events = list_events(year) if year else []
     event_options = [placeholder] + events
+    current_event_val = st.session_state.get("event")
+    event_index = 0
+    if current_event_val and current_event_val in events:
+        try:
+            event_index = event_options.index(current_event_val)
+        except ValueError:
+            event_index = 0
     event_label = st.sidebar.selectbox(
         "Grand Prix",
         event_options,
-        index=(event_options.index(st.session_state["event"]) if st.session_state["event"] in events else 0),
+        index=event_index,
         key="event_select",
         disabled=not bool(year)
     )
@@ -102,10 +116,17 @@ with tab_analysis:
     # Session selector
     sessions = list_sessions(year, event) if (year and event) else []
     session_options = [placeholder] + sessions
+    current_session_val = st.session_state.get("session")
+    session_index = 0
+    if current_session_val and current_session_val in sessions:
+        try:
+            session_index = session_options.index(current_session_val)
+        except ValueError:
+            session_index = 0
     session_label = st.sidebar.selectbox(
         "Session",
         session_options,
-        index=(session_options.index(st.session_state["session"]) if st.session_state["session"] in sessions else 0),
+        index=session_index,
         key="session_select",
         disabled=not bool(event)
     )
