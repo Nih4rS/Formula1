@@ -609,6 +609,19 @@ a {
   border-color: rgba(80, 160, 255, 0.28);
 }
 
+/* Accessible screen-reader-only helper */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 960px) {
   .telemetry-grid {
     grid-template-columns: 1fr;
