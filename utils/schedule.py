@@ -16,18 +16,29 @@ fastf1.Cache.enable_cache(CACHE)
 
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
 
-_SESSION_ORDER = [
-    "FP1", "FP2", "FP3", "SS", "SQ", "SPR", "Q", "R"
-]
+_SESSION_ORDER = ["FP1", "FP2", "FP3", "SS", "SQ", "SPR", "Q", "R"]
 _SESSION_FRIENDLY = {
     "FP1": "Free Practice 1",
     "FP2": "Free Practice 2",
     "FP3": "Free Practice 3",
-    "SS":  "Sprint Shootout",
-    "SQ":  "Sprint Qualifying",
+    "SS": "Sprint Shootout",
+    "SQ": "Sprint Qualifying",
     "SPR": "Sprint",
-    "Q":   "Qualifying",
-    "R":   "Race"
+    "Q": "Qualifying",
+    "R": "Race",
+}
+
+# FastF1 schedule dataframe uses column names like QualifyingDate, RaceDate etc;
+# Provide explicit mapping from session code to schedule column.
+_CODE_TO_COL = {
+    "FP1": "FP1Date",
+    "FP2": "FP2Date",
+    "FP3": "FP3Date",
+    "Q": "QualifyingDate",
+    "R": "RaceDate",
+    "SS": "SprintShootoutDate",  # 2023+ format
+    "SQ": "SprintQualifyingDate",  # legacy naming (pre shootout change)
+    "SPR": "SprintDate",
 }
 
 def _localize(ts_utc: Optional[pd.Timestamp]) -> Optional[pd.Timestamp]:
@@ -39,43 +50,52 @@ def _localize(ts_utc: Optional[pd.Timestamp]) -> Optional[pd.Timestamp]:
 
 
 def fetch_schedule(year: int) -> pd.DataFrame:
-    """Return tidy schedule with one row per session and both UTC and Local times."""
+    """Return tidy schedule with one row per session and both UTC and Local times.
+
+    This version fixes earlier incorrect usage of non-existent columns like 'QDate'.
+    We rely on explicit mapping of session codes to the correct FastF1 schedule
+    DataFrame column names (e.g. 'QualifyingDate', 'RaceDate'). If a column is
+    missing or NaT, we treat the session as unavailable.
+    """
     try:
         sched = fastf1.get_event_schedule(year, include_testing=False)
     except Exception:
         sched = None
 
-    if sched is not None and not sched.empty:
-        # FastF1 keeps per-session UTC columns; collect them into long form
-        rows = []
-        for _, ev in sched.iterrows():
-            event = str(ev["EventName"])
-            country = ev.get("Country", "")
-            location = ev.get("Location", "")
+    if sched is None or sched.empty:
+        return _fallback_schedule(year)
 
-            for code in ["FP1", "FP2", "FP3", "SS", "SQ", "SPR", "Q", "R"]:
-                utc_col = f"{code}Date"
-                if utc_col in ev and pd.notna(ev[utc_col]):
-                    ts_utc = pd.to_datetime(ev[utc_col], utc=True)
-                    rows.append({
-                        "Year": year,
-                        "EventName": event,
-                        "Country": country,
-                        "Location": location,
-                        "SessionCode": code,
-                        "Session": _SESSION_FRIENDLY.get(code, code),
-                        "StartUTC": ts_utc.to_pydatetime(),
-                        "StartLocal": _localize(ts_utc)
-                    })
+    rows = []
+    for _, ev in sched.iterrows():
+        event = str(ev.get("EventName", "")).strip()
+        country = str(ev.get("Country", ""))
+        location = str(ev.get("Location", ""))
+        for code, col in _CODE_TO_COL.items():
+            if col not in ev or pd.isna(ev[col]):
+                continue
+            try:
+                ts_utc = pd.to_datetime(ev[col], utc=True, errors="coerce")
+            except Exception:
+                ts_utc = None
+            if ts_utc is None or pd.isna(ts_utc):
+                continue
+            rows.append({
+                "Year": year,
+                "EventName": event,
+                "Country": country,
+                "Location": location,
+                "SessionCode": code,
+                "Session": _SESSION_FRIENDLY.get(code, code),
+                "StartUTC": ts_utc.to_pydatetime(),
+                "StartLocal": _localize(ts_utc)
+            })
 
-        df = pd.DataFrame(rows)
-        if df.empty:
-            return _fallback_schedule(year)
-        cat = pd.Categorical(df["SessionCode"], categories=_SESSION_ORDER, ordered=True)
-        df = df.assign(SessionOrder=cat).sort_values(["StartUTC", "EventName", "SessionOrder"]).reset_index(drop=True)
-        return df.drop(columns=["SessionOrder"])
-
-    return _fallback_schedule(year)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return _fallback_schedule(year)
+    cat = pd.Categorical(df["SessionCode"], categories=_SESSION_ORDER, ordered=True)
+    df = df.assign(SessionOrder=cat).sort_values(["EventName", "SessionOrder"]).reset_index(drop=True)
+    return df.drop(columns=["SessionOrder"])
 
 
 def next_session(df: pd.DataFrame, now: datetime | None = None) -> Optional[pd.Series]:
