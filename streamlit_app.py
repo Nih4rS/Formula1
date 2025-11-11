@@ -19,6 +19,7 @@ from models.position import ensure_model as ensure_pos_model, predict_for_race
 from models.podium import ensure_model as ensure_podium_model, predict_proba_for_race
 from utils.schedule import fetch_schedule, next_session, countdown_str
 from utils.events import slug_to_event_name, event_name_to_slug
+from utils.results import get_race_results, get_lap_times, get_session_results
 
 
 def _reset_filters_and_cache():
@@ -410,7 +411,39 @@ with tab_analysis:
                 if not drew:
                     st.info("No telemetry within the chosen radius. Increase radius or pick another turn.")
 
-    # (Race recap removed: load_race_summary not implemented yet)
+    # ---------------- Official Results ----------------
+    st.markdown("---")
+    st.subheader("Official results")
+    try:
+        results_df = get_session_results(int(year), event, session)
+    except Exception as exc:
+        st.info(f"Results unavailable: {exc}")
+        results_df = pd.DataFrame()
+    if results_df.empty:
+        st.info("No official classification available for this session.")
+    else:
+        st.dataframe(results_df, hide_index=True, use_container_width=True)
+
+    # ---------------- Race-only Lap Times ----------------
+    if session.upper() == "R":
+        st.markdown("#### Lap times")
+        driver_list = results_df["Driver"].tolist() if not results_df.empty else driver_selection
+        driver_list = driver_list or []
+        pick = st.selectbox("Driver (lap chart)", ["(All)"] + driver_list, key="lap_times_driver")
+        try:
+            laps_df = get_lap_times(int(year), event, None if pick == "(All)" else pick)
+        except Exception as exc:
+            st.info(f"Lap times unavailable: {exc}")
+            laps_df = pd.DataFrame()
+        if not laps_df.empty:
+            import plotly.express as px
+            plot_df = laps_df[["LapNumber", "Driver", "LapTime_s"]].dropna(subset=["LapTime_s"]).copy()
+            plot_df = plot_df.head(800)
+            fig_laps = px.line(plot_df, x="LapNumber", y="LapTime_s", color="Driver",
+                               title="Lap Time (s) vs Lap Number", height=400)
+            st.plotly_chart(fig_laps, use_container_width=True)
+            with st.expander("Raw lap data", expanded=False):
+                st.dataframe(laps_df, use_container_width=True)
 
 st.markdown("Tip: legend click toggles traces. Use the camera icon to download PNG.")
 
