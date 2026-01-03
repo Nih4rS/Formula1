@@ -1,1 +1,62 @@
-["ALB", "ALO", "ANT", "BEA", "BOR", "DOO", "GAS", "HAD", "HAM", "HUL", "LAW", "LEC", "NOR", "OCO", "PIA", "RUS", "SAI", "STR", "TSU", "VER"]
+{
+"PIA": {
+"Team": "McLaren"
+},
+"LEC": {
+"Team": "Ferrari"
+},
+"VER": {
+"Team": "Red Bull Racing"
+},
+"SAI": {
+"Team": "Williams"
+},
+"ALB": {
+"Team": "Williams"
+},
+"HAD": {
+"Team": "Racing Bulls"
+},
+"RUS": {
+"Team": "Mercedes"
+},
+"TSU": {
+"Team": "Red Bull Racing"
+},
+"ANT": {
+"Team": "Mercedes"
+},
+"ALO": {
+"Team": "Aston Martin"
+},
+"LAW": {
+"Team": "Racing Bulls"
+},
+"NOR": {
+"Team": "McLaren"
+},
+"HAM": {
+"Team": "Ferrari"
+},
+"HUL": {
+"Team": "Kick Sauber"
+},
+"BOR": {
+"Team": "Kick Sauber"
+},
+"BEA": {
+"Team": "Haas F1 Team"
+},
+"GAS": {
+"Team": "Alpine"
+},
+"OCO": {
+"Team": "Haas F1 Team"
+},
+"DOO": {
+"Team": "Alpine"
+},
+"STR": {
+"Team": "Aston Martin"
+}
+}

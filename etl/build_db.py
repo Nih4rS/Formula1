@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from utils.events import slug_to_event_name
+from utils.events import slug_to_event_name, event_name_to_slug
 from utils.schedule import fetch_schedule
 DATA_ROOT = ROOT / "data"
 DB_PATH = DATA_ROOT / "f1.duckdb"
@@ -202,7 +202,8 @@ def build(reset: bool = True) -> Path:
             if not sched.empty:
                 for _, r in sched.iterrows():
                     event_name = str(r.get("EventName", ""))
-                    event_slug = event_name.lower().replace(" ", "-").replace("grand prix", "grand-prix").replace("city", "city")
+                    # use centralized slugging to stay consistent with filesystem/UI
+                    event_slug = event_name_to_slug(event_name)
                     sched_rows.append((
                         int(y), event_slug, event_name,
                         r.get("SessionCode"), r.get("Session"),

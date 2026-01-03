@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, pathlib
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 
 import fastf1
 import numpy as np
@@ -94,8 +95,36 @@ with tab_analysis:
     year = None if year_label == placeholder else year_label
     st.session_state["year"] = year
 
-    # GP selector
+    # GP selector (sorted by proximity to today using schedule; future first, then nearest past)
     events = list_events(year) if year else []
+    if year and events:
+        try:
+            sched_df = fetch_schedule(int(year))
+        except Exception:
+            sched_df = pd.DataFrame()
+        if not sched_df.empty:
+            now = datetime.now(timezone.utc)
+            rows = []
+            for ev_name, grp in sched_df.groupby("EventName"):
+                slug = event_name_to_slug(str(ev_name))
+                if slug not in events:
+                    continue
+                # Prefer Race time if present, else latest session time
+                race_ts = pd.to_datetime(grp.loc[grp["SessionCode"] == "R", "StartUTC"], utc=True, errors="coerce")
+                if not race_ts.empty and pd.notna(race_ts.iloc[0]):
+                    dt = race_ts.iloc[0]
+                else:
+                    dt = pd.to_datetime(grp["StartUTC"], utc=True, errors="coerce").max()
+                if pd.isna(dt):
+                    continue
+                is_past = 1 if dt <= now else 0  # future first
+                diff = abs((dt.to_pydatetime().replace(tzinfo=timezone.utc) - now).total_seconds())
+                rows.append((slug, is_past, diff))
+            if rows:
+                rows.sort(key=lambda t: (t[1], t[2]))
+                ordered_slugs = [s for s, _, _ in rows]
+                leftovers = sorted([e for e in events if e not in set(ordered_slugs)])
+                events = ordered_slugs + leftovers
     event_options = [placeholder] + events
     current_event_val = st.session_state.get("event")
     event_index = 0
@@ -182,19 +211,33 @@ with tab_analysis:
     else:
         # sort ascending for next GP detection (fetch_schedule already chronological but be explicit)
         sched_preview = sched_preview.sort_values("StartUTC")
-        ns_preview = next_session(sched_preview)
-        if ns_preview is not None:
-            cols = st.columns([1, 1, 1, 1])
-            cols[0].metric("Next GP", ns_preview["EventName"], help=ns_preview["Session"])
-            cols[1].metric("Session", ns_preview["Session"])
+        # Determine next GP by selecting the nearest future Race (SessionCode == 'R').
+        now_utc = datetime.now(timezone.utc)
+        race_rows = sched_preview[(sched_preview["SessionCode"] == "R") & (pd.to_datetime(sched_preview["StartUTC"], utc=True) > now_utc)]
+        race_rows = race_rows.sort_values("StartUTC")
+        next_gp_row = race_rows.iloc[0] if not race_rows.empty else None
+        # Fallback: if no future Race exists (season complete or missing race times), fall back to generic next session.
+        if next_gp_row is None:
+            ns_preview = next_session(sched_preview)
+            next_gp_row = ns_preview if ns_preview is not None else None
+        if next_gp_row is not None:
+            # Countdown to race (or session if fallback) for UX clarity.
+            target_utc = next_gp_row["StartUTC"]
+            countdown = countdown_str(target_utc) if pd.notna(target_utc) else "TBD"
+            cols = st.columns([1, 1, 1, 1, 1])
+            cols[0].metric("Next GP", next_gp_row["EventName"], help=next_gp_row["Session"])
+            cols[1].metric("Session", next_gp_row["Session"])
             cols[2].metric(
                 "Local",
-                ns_preview["StartLocal"].strftime("%a %d %b %H:%M") if pd.notna(ns_preview["StartLocal"]) else "TBD"
+                next_gp_row["StartLocal"].strftime("%a %d %b %H:%M") if pd.notna(next_gp_row["StartLocal"]) else "TBD"
             )
             cols[3].metric(
                 "UTC",
-                ns_preview["StartUTC"].strftime("%a %d %b %H:%M") if pd.notna(ns_preview["StartUTC"]) else "TBD"
+                next_gp_row["StartUTC"].strftime("%a %d %b %H:%M") if pd.notna(next_gp_row["StartUTC"]) else "TBD"
             )
+            cols[4].metric("Countdown", countdown)
+        else:
+            st.info("Season complete – no upcoming Grand Prix.")
         with st.expander(f"{year} season schedule (latest first)", expanded=False):
             df_preview = sched_preview.copy().sort_values("StartUTC", ascending=False)
             def _fmt(series):
@@ -443,7 +486,14 @@ with tab_analysis:
                                title="Lap Time (s) vs Lap Number", height=400)
             st.plotly_chart(fig_laps, use_container_width=True)
             with st.expander("Raw lap data", expanded=False):
-                st.dataframe(laps_df, use_container_width=True)
+                # Prefer precise string columns for timing if available
+                display_cols = [
+                    "LapNumber", "Driver",
+                    "LapTime_str", "Sector1Time_str", "Sector2Time_str", "Sector3Time_str",
+                    "Compound", "TyreLife", "PitOutTime", "PitInTime"
+                ]
+                present = [c for c in display_cols if c in laps_df.columns]
+                st.dataframe(laps_df[present], use_container_width=True)
 
 st.markdown("Tip: legend click toggles traces. Use the camera icon to download PNG.")
 

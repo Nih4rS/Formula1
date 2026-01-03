@@ -13,6 +13,32 @@ CACHE.mkdir(exist_ok=True)
 fastf1.Cache.enable_cache(CACHE)
 
 
+def _fmt_td(value) -> str | None:
+    try:
+        if pd.isna(value) or value is None:
+            return None
+    except Exception:
+        pass
+    # Accept pandas Timedelta or datetime-like with total_seconds
+    try:
+        total = value.total_seconds()  # type: ignore[attr-defined]
+    except Exception:
+        try:
+            total = float(value)
+        except Exception:
+            return str(value)
+    neg = total < 0
+    total = abs(total)
+    h = int(total // 3600)
+    m = int((total % 3600) // 60)
+    s = total % 60
+    if h:
+        s_str = f"{h}:{m:02d}:{s:06.3f}"
+    else:
+        s_str = f"{m}:{s:06.3f}"
+    return f"-{s_str}" if neg else s_str
+
+
 def get_race_results(year: int, event_slug: str) -> pd.DataFrame:
     """Return official race classification table for the selected GP.
 
@@ -34,6 +60,9 @@ def get_race_results(year: int, event_slug: str) -> pd.DataFrame:
         "Points": df.get("Points", pd.Series([0]*len(df))),
         "Status": df.get("Status", pd.Series([None]*len(df))),
     }).sort_values("Position").reset_index(drop=True)
+    # Format total time if present
+    if "Time" in df.columns:
+        out["Time"] = df["Time"].map(_fmt_td)
     return out
 
 
@@ -64,6 +93,7 @@ def get_lap_times(year: int, event_slug: str, driver: Optional[str] = None) -> p
     for c in ["LapTime", "Sector1Time", "Sector2Time", "Sector3Time"]:
         if c in df.columns:
             df[c + "_s"] = df[c].map(td_to_s)
+            df[c + "_str"] = df[c].map(_fmt_td)
     return df.reset_index(drop=True)
 
 
@@ -96,5 +126,10 @@ def get_session_results(year: int, event_slug: str, session_code: str) -> pd.Dat
     ]
     for out_name, src in optional_cols:
         if src in df.columns:
-            out[out_name] = df[src]
+            val = df[src]
+            # Format timedelta-like columns into strings to avoid humanized labels
+            if src in ("Time", "Q1", "Q2", "Q3"):
+                out[out_name] = val.map(_fmt_td)
+            else:
+                out[out_name] = val
     return out.sort_values("Position").reset_index(drop=True)
